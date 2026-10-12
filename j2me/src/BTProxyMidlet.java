@@ -19,7 +19,8 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
     private String connectionURL = null;
 
     private static final UUID SPP_UUID = new UUID(0x1101); 
-    private static final String BT_MAC = "00:11:22:33:44:55"; 
+    // MAC-адрес без двоеточий для удобного парсинга в long
+    private static final String BT_MAC = "001122334455"; 
 
     public BTProxyMidlet() {
         display = Display.getDisplay(this);
@@ -63,7 +64,8 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
         try {
             localDevice = LocalDevice.getLocalDevice();
             agent = localDevice.getDiscoveryAgent();
-            remoteDevice = agent.getRemoteDevice(BT_MAC.replace(":", ""));
+            // ИСПРАВЛЕНИЕ: преобразуем hex-строку MAC-адреса в long
+            remoteDevice = agent.getRemoteDevice(Long.parseLong(BT_MAC, 16));
             resultItem.setText("Поиск сервиса...");
             
             int[] attrSet = { 0x0100 }; 
