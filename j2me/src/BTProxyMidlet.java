@@ -19,7 +19,7 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
     private String connectionURL = null;
 
     private static final UUID SPP_UUID = new UUID(0x1101); 
-    // MAC-адрес без двоеточий для удобного парсинга в long
+    // 12 hex-символов без двоеточий, как требует JSR-82
     private static final String BT_MAC = "001122334455"; 
 
     public BTProxyMidlet() {
@@ -64,8 +64,8 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
         try {
             localDevice = LocalDevice.getLocalDevice();
             agent = localDevice.getDiscoveryAgent();
-            // ИСПРАВЛЕНИЕ: преобразуем hex-строку MAC-адреса в long
-            remoteDevice = agent.getRemoteDevice(Long.parseLong(BT_MAC, 16));
+            // JSR-82 getRemoteDevice принимает String
+            remoteDevice = agent.getRemoteDevice(BT_MAC);
             resultItem.setText("Поиск сервиса...");
             
             int[] attrSet = { 0x0100 }; 
@@ -142,8 +142,14 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
         }
     }
 
+    // Java 1.3 совместимая версия (без String.replace(CharSequence))
     private String extractHost(String url) {
-        String h = url.replace("http://", "").replace("https://", "");
+        String h = url;
+        if (h.startsWith("http://")) {
+            h = h.substring(7);
+        } else if (h.startsWith("https://")) {
+            h = h.substring(8);
+        }
         int slash = h.indexOf('/');
         return slash > 0 ? h.substring(0, slash) : h;
     }
