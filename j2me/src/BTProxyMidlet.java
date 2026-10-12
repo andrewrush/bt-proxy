@@ -91,8 +91,7 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
             } else {
                 statusItem.setText("Empty response");
             }
-        } catch (Throwable e) { // Ловим Throwable, чтобы поймать даже Errors
-            // ИСПОЛЬЗУЕМ toString() вместо getMessage()
+        } catch (Throwable e) {
             String errMsg = e.toString();
             if (errMsg == null || errMsg.trim().length() == 0) {
                 errMsg = e.getClass().getName();
