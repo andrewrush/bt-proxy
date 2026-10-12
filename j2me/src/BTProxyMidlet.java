@@ -60,7 +60,9 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
             }
             
             String mac = macField.getString().trim().toUpperCase();
-            String connStr = "btspp://" + mac + ":1;authenticate=false;encrypt=false;master=false";
+            
+            // МАКСИМАЛЬНО УПРОЩЕННАЯ СТРОКА для обхода бага парсера Nokia S40
+            String connStr = "btspp://" + mac + ":1";
             
             conn = (StreamConnection) Connector.open(connStr);
             os = conn.openOutputStream();
@@ -72,7 +74,7 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
             int slash = host.indexOf('/');
             if (slash > 0) host = host.substring(0, slash);
 
-            String req = "GET " + url + " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: NokiaX2-00\r\nConnection: close\r\n\r\n";
+            String req = "GET " + url + " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: Nokia\r\nConnection: close\r\n\r\n";
             os.write(req.getBytes("UTF-8"));
             os.flush();
             

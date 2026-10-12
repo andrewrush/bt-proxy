@@ -21,7 +21,6 @@ jobs:
             -d j2me/build/classes j2me/src/BTProxyMidlet.java
       - name: Package JAR + JAD
         run: |
-          # Формат для Nokia S40: Имя,,Класс (ДВЕ запятые, НОЛЬ пробелов)
           echo "Manifest-Version: 1.0" > j2me/manifest.txt
           echo "MIDlet-Name: BTProxy" >> j2me/manifest.txt
           echo "MIDlet-Version: 1.0" >> j2me/manifest.txt
@@ -29,20 +28,16 @@ jobs:
           echo "MIDlet-1: BTProxy,,btproxy.BTProxyMidlet" >> j2me/manifest.txt
           echo "MicroEdition-Profile: MIDP-2.0" >> j2me/manifest.txt
           echo "MicroEdition-Configuration: CLDC-1.1" >> j2me/manifest.txt
-          # КРИТИЧЕСКИ ВАЖНО для Nokia S40:
-          echo "MIDlet-Permissions: javax.microedition.io.Connector.http, javax.microedition.io.Connector.https, javax.microedition.io.Connector.bluetooth" >> j2me/manifest.txt
+          echo "MIDlet-Permissions: javax.microedition.io.Connector.http,javax.microedition.io.Connector.https,javax.microedition.io.Connector.bluetooth" >> j2me/manifest.txt
           
           jar cfm j2me/BTProxy.jar j2me/manifest.txt -C j2me/build/classes .
           
           JAR_SIZE=$(stat -c%s j2me/BTProxy.jar)
           
-          # Генерируем JAD с теми же строгими параметрами
-          printf "MIDlet-Name: BTProxy\nMIDlet-Version: 1.0\nMIDlet-Vendor: andrewrush\nMIDlet-1: BTProxy,,btproxy.BTProxyMidlet\nMIDlet-Jar-URL: BTProxy.jar\nMIDlet-Jar-Size: %s\nMIDlet-Permissions: javax.microedition.io.Connector.http, javax.microedition.io.Connector.https, javax.microedition.io.Connector.bluetooth\n" "$JAR_SIZE" > j2me/BTProxy.jad
+          printf "MIDlet-Name: BTProxy\nMIDlet-Version: 1.0\nMIDlet-Vendor: andrewrush\nMIDlet-1: BTProxy,,btproxy.BTProxyMidlet\nMIDlet-Jar-URL: BTProxy.jar\nMIDlet-Jar-Size: %s\nMIDlet-Permissions: javax.microedition.io.Connector.http,javax.microedition.io.Connector.https,javax.microedition.io.Connector.bluetooth\n" "$JAR_SIZE" > j2me/BTProxy.jad
           
           echo "--- JAD CONTENT ---"
           cat j2me/BTProxy.jad
-          echo "--- JAR CONTENTS ---"
-          jar tf j2me/BTProxy.jar
       - uses: actions/upload-artifact@v4
         with:
           name: j2me-midlet
