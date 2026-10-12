@@ -64,19 +64,17 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
             if (mac == null) mac = "000000000000";
             mac = mac.trim().toUpperCase();
             
-            // Массив каналов для перебора (Android обычно использует 1, 2 или 3)
+            // ИСПРАВЛЕНИЕ: Убрали master=true/false, оставляем только канал
             String[] channels = {"1", "2", "3", "4", "5"};
             Exception lastErr = null;
             
-            // Java 1.3 совместимый цикл
             for (int i = 0; i < channels.length; i++) {
                 String ch = channels[i];
                 try {
                     statusItem.setText("Trying ch " + ch + "...");
-                    // master=true критически важен для Nokia при инициации соединения
-                    String connStr = "btspp://" + mac + ":" + ch + ";authenticate=false;encrypt=false;master=true";
+                    // Минимальная строка подключения БЕЗ master=
+                    String connStr = "btspp://" + mac + ":" + ch + ";authenticate=false;encrypt=false";
                     conn = (StreamConnection) Connector.open(connStr);
-                    // Если мы здесь, значит подключение успешно! Прерываем цикл.
                     break;
                 } catch (Exception e) {
                     lastErr = e;
