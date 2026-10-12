@@ -28,7 +28,6 @@ import java.util.UUID;
 import javax.net.ssl.SSLSocketFactory;
 
 public class MainActivity extends Activity {
-    // Используем стандартный SPP UUID
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     
     private TextView tvInstructions, tvLogs;
@@ -39,7 +38,6 @@ public class MainActivity extends Activity {
     private boolean isRunning = false;
     private BluetoothServerSocket serverSocket;
     private Thread serverThread;
-    private static final int PERMISSION_REQUEST_CODE = 1001;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -51,7 +49,7 @@ public class MainActivity extends Activity {
         
         tvInstructions = new TextView(this);
         tvInstructions.setTextSize(16);
-        tvInstructions.setText("ИНСТРУКЦИЯ:\n1. Сопрягите устройства.\n2. На Nokia введите URL: http://neverssl.com\n3. Нажмите СТАРТ ниже.\n4. На Nokia нажмите Connect.");
+        tvInstructions.setText("ИНСТРУКЦИЯ (Legacy Mode):\n1. Сопрягите Nokia и этот телефон.\n2. На Nokia запустите поиск и выберите этот телефон.\n3. Нажмите СТАРТ ниже.");
         layout.addView(tvInstructions);
         
         btnStartStop = new Button(this);
@@ -60,7 +58,7 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 if (isRunning) stopServer();
-                else checkPermissionsAndStart();
+                else startServerLegacy();
             }
         });
         layout.addView(btnStartStop);
@@ -90,38 +88,20 @@ public class MainActivity extends Activity {
         handler = new Handler(Looper.getMainLooper());
     }
 
-    private void checkPermissionsAndStart() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
-                checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
-                log("Запрос разрешений...");
-                requestPermissions(new String[]{
-                    android.Manifest.permission.BLUETOOTH_CONNECT,
-                    android.Manifest.permission.BLUETOOTH_SCAN
-                }, PERMISSION_REQUEST_CODE);
+    private void startServerLegacy() {
+        if (isRunning) return;
+        
+        // Простая проверка для очень старых Android (до 6.0 разрешения даются при установке)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (checkSelfPermission(android.Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED) {
+                log("ОШИБКА: Нет разрешения Bluetooth. Дайте его в настройках.");
                 return;
             }
         }
-        startServer();
-    }
 
-    @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        if (requestCode == PERMISSION_REQUEST_CODE) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                log("Разрешения получены.");
-                startServer();
-            } else {
-                log("ОШИБКА: Нет разрешения Bluetooth!");
-            }
-        }
-    }
-
-    private void startServer() {
-        if (isRunning) return;
         isRunning = true;
         btnStartStop.setText("СТОП СЕРВЕРА");
-        log("Сервер запускается (Стандартный SPP)...");
+        log("Сервер запускается (Legacy Mode)...");
         serverThread = new Thread(new ServerRunnable());
         serverThread.start();
     }
@@ -143,7 +123,7 @@ public class MainActivity extends Activity {
         public void run() {
             try {
                 log("Ожидание подключений...");
-                // ТОЛЬКО стандартный публичный API, как в Serial Bluetooth Terminal
+                // Используем стандартный метод, который на старых Android отлично работает с J2ME
                 serverSocket = BluetoothAdapter.getDefaultAdapter()
                         .listenUsingRfcommWithServiceRecord("BTProxy", SPP_UUID);
                 

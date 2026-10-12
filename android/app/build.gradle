@@ -4,25 +4,28 @@ plugins {
 
 android {
     namespace 'com.example.btproxy'
-    compileSdk 34
+    compileSdk 33 // Оставляем высоким для совместимости с современными инструментами сборки
 
     defaultConfig {
         applicationId "com.example.btproxy"
-        minSdk 21
-        targetSdk 30
-        versionCode 1
-        versionName "1.0"
+        minSdkVersion 19      // Android 4.4 (KitKat) - отличная поддержка legacy Bluetooth
+        targetSdkVersion 28   // Android 9 (Pie) - последняя версия с "мягкой" моделью разрешений
+        versionCode 2
+        versionName "2.0-Legacy"
     }
 
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
-    
-    lint {
-        disable 'ExpiredTargetSdkVersion'
-    }
 }
 
 dependencies {
+    // Минимальные зависимости, никаких тяжелых библиотек
 }
