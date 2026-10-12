@@ -17,9 +17,7 @@ import android.widget.Button;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
-import java.io.BufferedReader;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.URL;
@@ -148,9 +146,8 @@ public class MainActivity extends Activity {
                         .listenUsingRfcommWithServiceRecord("BTProxy", SPP_UUID);
                 
                 while (isRunning) {
-                    log("accept() - жду соединение...");
                     BluetoothSocket clientSocket = serverSocket.accept();
-                    log("Клиент подключился! Запускаю обработчик...");
+                    log("Клиент подключился!");
                     new Thread(new ClientHandler(clientSocket)).start();
                 }
             } catch (Exception e) {
@@ -165,17 +162,36 @@ public class MainActivity extends Activity {
 
         public void run() {
             try {
-                log("Получаю InputStream...");
                 InputStream in = clientSocket.getInputStream();
-                log("Получаю OutputStream...");
                 OutputStream out = clientSocket.getOutputStream();
-                
-                log("Читаю первую строку запроса...");
-                BufferedReader reader = new BufferedReader(new InputStreamReader(in));
-                String requestLine = reader.readLine();
-                log("Получено: " + (requestLine != null ? requestLine : "null"));
 
-                if (requestLine != null && requestLine.startsWith("GET http")) {
+                // Читаем запрос побайтово до \r\n\r\n (конец заголовков HTTP)
+                StringBuilder sb = new StringBuilder();
+                byte[] buffer = new byte[1];
+                int b;
+                int doubleCRLFCount = 0;
+                while ((b = in.read()) != -1) {
+                    char c = (char) b;
+                    sb.append(c);
+                    
+                    if (c == '\r') {
+                        doubleCRLFCount++;
+                    } else if (c == '\n' && doubleCRLFCount % 2 == 1) {
+                        doubleCRLFCount++;
+                    } else {
+                        doubleCRLFCount = 0;
+                    }
+                    
+                    // Если нашли конец заголовков (\r\n\r\n)
+                    if (doubleCRLFCount >= 4) {
+                        break;
+                    }
+                }
+
+                String requestLine = sb.toString().trim();
+                log("Получено: " + requestLine.substring(0, Math.min(requestLine.length(), 100)));
+
+                if (requestLine.startsWith("GET http")) {
                     String[] tokens = requestLine.split(" ");
                     if (tokens.length < 2) {
                         log("Ошибка: неверный формат URL");
@@ -196,26 +212,24 @@ public class MainActivity extends Activity {
                     InputStream targetIn = targetSocket.getInputStream();
 
                     targetOut.write(("GET " + path + " HTTP/1.1\r\n").getBytes("UTF-8"));
-                    String headerLine;
-                    while ((headerLine = reader.readLine()) != null && headerLine.trim().length() > 0) {
-                        targetOut.write((headerLine + "\r\n").getBytes("UTF-8"));
-                    }
-                    targetOut.write("\r\n".getBytes("UTF-8"));
+                    targetOut.write(("Host: " + host + "\r\n").getBytes("UTF-8"));
+                    targetOut.write("User-Agent: BTProxyServer\r\n".getBytes("UTF-8"));
+                    targetOut.write("Connection: close\r\n\r\n".getBytes("UTF-8"));
                     targetOut.flush();
                     log("Запрос отправлен цели, жду ответ...");
 
-                    byte[] buffer = new byte[4096];
+                    byte[] respBuffer = new byte[4096];
                     int bytesRead;
                     int total = 0;
-                    while ((bytesRead = targetIn.read(buffer)) != -1) {
-                        out.write(buffer, 0, bytesRead);
+                    while ((bytesRead = targetIn.read(respBuffer)) != -1) {
+                        out.write(respBuffer, 0, bytesRead);
                         out.flush();
                         total += bytesRead;
                     }
-                    log("Отправлено байт: " + total);
+                    log("Отправлено байт клиенту: " + total);
                     targetSocket.close();
                 } else {
-                    log("Игнорирован не-HTTP запрос: " + requestLine);
+                    log("Игнорирован не-HTTP запрос");
                 }
             } catch (Exception e) {
                 log("Ошибка обработки: " + e.getMessage());
