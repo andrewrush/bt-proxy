@@ -64,12 +64,39 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
             if (mac == null) mac = "000000000000";
             mac = mac.trim().toUpperCase();
             
-            // ИСПРАВЛЕНИЕ: Используем UUID сервиса вместо жесткого канала :1
-            // Стандартный SPP UUID: 0000110100001000800000805F9B34FB
-            // master=true часто требуется Nokia при инициации соединения
-            String connStr = "btspp://" + mac + ":0000110100001000800000805F9B34FB;name=BTProxy;authenticate=false;encrypt=false;master=true";
+            // Массив каналов для перебора (Android обычно использует 1, 2 или 3)
+            String[] channels = {"1", "2", "3", "4", "5"};
+            Exception lastErr = null;
             
-            conn = (StreamConnection) Connector.open(connStr);
+            // Java 1.3 совместимый цикл
+            for (int i = 0; i < channels.length; i++) {
+                String ch = channels[i];
+                try {
+                    statusItem.setText("Trying ch " + ch + "...");
+                    // master=true критически важен для Nokia при инициации соединения
+                    String connStr = "btspp://" + mac + ":" + ch + ";authenticate=false;encrypt=false;master=true";
+                    conn = (StreamConnection) Connector.open(connStr);
+                    // Если мы здесь, значит подключение успешно! Прерываем цикл.
+                    break;
+                } catch (Exception e) {
+                    lastErr = e;
+                    if (conn != null) {
+                        try { conn.close(); } catch (Exception ex) {}
+                        conn = null;
+                    }
+                }
+            }
+            
+            if (conn == null) {
+                String errMsg = lastErr.getMessage();
+                if (errMsg == null || errMsg.trim().length() == 0) {
+                    errMsg = lastErr.getClass().getName();
+                }
+                statusItem.setText("Error: " + errMsg);
+                return;
+            }
+            
+            statusItem.setText("Connected! Sending...");
             os = conn.openOutputStream();
             is = conn.openInputStream();
             
