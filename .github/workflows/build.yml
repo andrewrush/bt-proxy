@@ -11,16 +11,14 @@ jobs:
       - name: Download and validate J2ME API stubs
         run: |
           mkdir -p j2me/lib
-          URL_MIDP="https://repo1.maven.org/maven2/net/sf/midpapi/midpapi20/2.0/midpapi20-2.0.jar"
-          URL_CLDC="https://repo1.maven.org/maven2/net/sf/midpapi/cldcapi11/1.1/cldcapi11-1.1.jar"
+          URL_MIDP="https://repo1.maven.org/maven2/org/microemu/midpapi20/2.0.4/midpapi20-2.0.4.jar"
+          URL_CLDC="https://repo1.maven.org/maven2/org/microemu/cldcapi11/2.0.4/cldcapi11-2.0.4.jar"
           
-          wget -q --spider "$URL_MIDP" || { echo "MIDP JAR not found"; exit 1; }
           wget -q -O j2me/lib/midpapi20.jar "$URL_MIDP"
-          file j2me/lib/midpapi20.jar | grep -q "Zip archive" || { echo "Invalid MIDP JAR"; exit 1; }
+          jar tf j2me/lib/midpapi20.jar > /dev/null || { echo "Invalid MIDP JAR"; exit 1; }
           
-          wget -q --spider "$URL_CLDC" || { echo "CLDC JAR not found"; exit 1; }
           wget -q -O j2me/lib/cldcapi11.jar "$URL_CLDC"
-          file j2me/lib/cldcapi11.jar | grep -q "Zip archive" || { echo "Invalid CLDC JAR"; exit 1; }
+          jar tf j2me/lib/cldcapi11.jar > /dev/null || { echo "Invalid CLDC JAR"; exit 1; }
       - name: Compile MIDlet
         run: |
           mkdir -p j2me/build/classes
