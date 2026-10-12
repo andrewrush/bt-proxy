@@ -27,17 +27,17 @@ jobs:
           wget -q -O j2me/lib/pg/proguard.zip https://github.com/Guardsquare/proguard/releases/download/v7.3.2/proguard-7.3.2.zip
           unzip -q -d j2me/lib/pg j2me/lib/pg/proguard.zip
           
-          echo "-injars j2me/build/classes" > j2me/proguard.cfg
-          echo "-outjars j2me/build/preverified" >> j2me/proguard.cfg
-          echo "-libraryjars j2me/lib/cldcapi11.jar" >> j2me/proguard.cfg
-          echo "-libraryjars j2me/lib/midpapi20.jar" >> j2me/proguard.cfg
-          echo "-microedition" >> j2me/proguard.cfg
-          echo "-dontobfuscate" >> j2me/proguard.cfg
-          echo "-dontoptimize" >> j2me/proguard.cfg
-          echo "-dontshrink" >> j2me/proguard.cfg
-          # Опция -preverify удалена, так как она включена по умолчанию в современных версиях ProGuard
+          # Создаем конфиг в КОРНЕВОЙ директории, чтобы относительные пути работали корректно!
+          echo "-injars j2me/build/classes" > proguard.cfg
+          echo "-outjars j2me/build/preverified" >> proguard.cfg
+          echo "-libraryjars j2me/lib/cldcapi11.jar" >> proguard.cfg
+          echo "-libraryjars j2me/lib/midpapi20.jar" >> proguard.cfg
+          echo "-microedition" >> proguard.cfg
+          echo "-dontobfuscate" >> proguard.cfg
+          echo "-dontoptimize" >> proguard.cfg
+          echo "-dontshrink" >> proguard.cfg
           
-          java -jar j2me/lib/pg/proguard-7.3.2/lib/proguard.jar @j2me/proguard.cfg
+          java -jar j2me/lib/pg/proguard-7.3.2/lib/proguard.jar @proguard.cfg
           
           echo "--- Bytecode version check ---"
           javap -verbose j2me/build/preverified/btproxy/BTProxyMidlet.class | grep "major version" || true
