@@ -55,14 +55,16 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
         OutputStream os = null;
         try {
             String url = urlField.getString();
+            if (url == null) url = "http://example.com";
             if (!url.startsWith("http://") && !url.startsWith("https://")) {
                 url = "http://" + url;
             }
             
-            String mac = macField.getString().trim().toUpperCase();
+            String mac = macField.getString();
+            if (mac == null) mac = "000000000000";
+            mac = mac.trim().toUpperCase();
             
-            // МАКСИМАЛЬНО УПРОЩЕННАЯ СТРОКА для обхода бага парсера Nokia S40
-            String connStr = "btspp://" + mac + ":1";
+            String connStr = "btspp://" + mac + ":1;authenticate=false;encrypt=false;master=false";
             
             conn = (StreamConnection) Connector.open(connStr);
             os = conn.openOutputStream();
@@ -74,7 +76,7 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
             int slash = host.indexOf('/');
             if (slash > 0) host = host.substring(0, slash);
 
-            String req = "GET " + url + " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: Nokia\r\nConnection: close\r\n\r\n";
+            String req = "GET " + url + " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: NokiaX2-00\r\nConnection: close\r\n\r\n";
             os.write(req.getBytes("UTF-8"));
             os.flush();
             
@@ -88,7 +90,12 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
                 statusItem.setText("Empty response");
             }
         } catch (Exception e) {
-            statusItem.setText("Error: " + e.getMessage());
+            // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: если getMessage() возвращает null, показываем имя класса ошибки
+            String errMsg = e.getMessage();
+            if (errMsg == null || errMsg.trim().length() == 0) {
+                errMsg = e.getClass().getName();
+            }
+            statusItem.setText("Error: " + errMsg);
         } finally {
             try { if (is != null) is.close(); } catch (Exception e) {}
             try { if (os != null) os.close(); } catch (Exception e) {}
