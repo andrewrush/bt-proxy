@@ -3,30 +3,25 @@ package btproxy;
 import javax.microedition.midlet.*;
 import javax.microedition.lcdui.*;
 import javax.microedition.io.*;
-import javax.bluetooth.*;
 import java.io.*;
 
-public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryListener {
+public class BTProxyMidlet extends MIDlet implements CommandListener {
     private Display display;
     private Form form;
     private TextField urlField;
     private Command exitCommand, goCommand;
     private StringItem resultItem;
     
-    private LocalDevice localDevice;
-    private DiscoveryAgent agent;
-    private RemoteDevice remoteDevice;
-    private String connectionURL = null;
-
-    private static final UUID SPP_UUID = new UUID(0x1101); 
-    // 12 hex-символов без двоеточий, как требует JSR-82
-    private static final String BT_MAC = "001122334455"; 
+    // ЗАМЕНИТЕ на реальный MAC-адрес вашего Android-устройства (без двоеточий)
+    // и укажите правильный RFCOMM-канал (обычно 1, 2 или 3)
+    private static final String BT_MAC = "001122334455";
+    private static final int BT_CHANNEL = 1;
 
     public BTProxyMidlet() {
         display = Display.getDisplay(this);
         form = new Form("Bluetooth Internet Proxy");
         urlField = new TextField("URL:", "http://example.com", 100, TextField.ANY);
-        resultItem = new StringItem("Статус:", "Инициализация...");
+        resultItem = new StringItem("Статус:", "Готово к работе");
         goCommand = new Command("Загрузить", Command.OK, 1);
         exitCommand = new Command("Выход", Command.EXIT, 1);
         
@@ -39,7 +34,6 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
 
     protected void startApp() { 
         display.setCurrent(form);
-        initBluetooth();
     }
     protected void pauseApp() {}
     protected void destroyApp(boolean unconditional) {}
@@ -48,50 +42,11 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
         if (c == exitCommand) {
             notifyDestroyed();
         } else if (c == goCommand) {
-            if (connectionURL == null) {
-                resultItem.setText("Ошибка: Bluetooth не инициализирован или сервис не найден.");
-                return;
-            }
             resultItem.setText("Подключение и загрузка...");
             Thread t = new Thread(new Runnable() {
                 public void run() { connectAndFetch(); }
             });
             t.start();
-        }
-    }
-
-    private void initBluetooth() {
-        try {
-            localDevice = LocalDevice.getLocalDevice();
-            agent = localDevice.getDiscoveryAgent();
-            // JSR-82 getRemoteDevice принимает String
-            remoteDevice = agent.getRemoteDevice(BT_MAC);
-            resultItem.setText("Поиск сервиса...");
-            
-            int[] attrSet = { 0x0100 }; 
-            agent.searchServices(attrSet, new UUID[] { SPP_UUID }, remoteDevice, this);
-        } catch (Exception e) {
-            resultItem.setText("Ошибка BT: " + e.getMessage());
-        }
-    }
-
-    public void deviceDiscovered(RemoteDevice btDevice, DeviceClass cod) {}
-    public void inquiryCompleted(int discType) {}
-    
-    public void serviceSearchCompleted(int transID, int respCode) {
-        if (connectionURL != null) return;
-        
-        if (respCode == DiscoveryListener.SERVICE_SEARCH_NO_RECORDS ||
-            respCode == DiscoveryListener.SERVICE_SEARCH_DEVICE_NOT_REACHABLE ||
-            respCode == DiscoveryListener.SERVICE_SEARCH_ERROR) {
-            resultItem.setText("Сервис не найден. Проверьте MAC и сервер.");
-        }
-    }
-    
-    public void servicesDiscovered(int transID, ServiceRecord[] servRecord) {
-        if (servRecord.length > 0) {
-            connectionURL = servRecord[0].getConnectionURL(ServiceRecord.NOAUTHENTICATE_NOENCRYPT, true);
-            resultItem.setText("Готово. Введите URL.");
         }
     }
 
@@ -105,7 +60,11 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
                 url = "http://" + url;
             }
 
-            conn = (StreamConnection) Connector.open(connectionURL);
+            // Прямое подключение к известному MAC-адресу и каналу без Service Discovery
+            String connUrl = "btspp://" + BT_MAC + ":" + BT_CHANNEL + 
+                             ";authenticate=false;encrypt=false;master=true";
+            
+            conn = (StreamConnection) Connector.open(connUrl);
             os = conn.openOutputStream();
             is = conn.openInputStream();
 
@@ -142,7 +101,6 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
         }
     }
 
-    // Java 1.3 совместимая версия (без String.replace(CharSequence))
     private String extractHost(String url) {
         String h = url;
         if (h.startsWith("http://")) {
