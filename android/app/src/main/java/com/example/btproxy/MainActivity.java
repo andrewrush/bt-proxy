@@ -148,8 +148,9 @@ public class MainActivity extends Activity {
                         .listenUsingRfcommWithServiceRecord("BTProxy", SPP_UUID);
                 
                 while (isRunning) {
+                    log("accept() - жду соединение...");
                     BluetoothSocket clientSocket = serverSocket.accept();
-                    log("Клиент подключился!");
+                    log("Клиент подключился! Запускаю обработчик...");
                     new Thread(new ClientHandler(clientSocket)).start();
                 }
             } catch (Exception e) {
@@ -164,11 +165,13 @@ public class MainActivity extends Activity {
 
         public void run() {
             try {
+                log("Получаю InputStream...");
                 InputStream in = clientSocket.getInputStream();
+                log("Получаю OutputStream...");
                 OutputStream out = clientSocket.getOutputStream();
+                
+                log("Читаю первую строку запроса...");
                 BufferedReader reader = new BufferedReader(new InputStreamReader(in));
-
-                log("Чтение запроса...");
                 String requestLine = reader.readLine();
                 log("Получено: " + (requestLine != null ? requestLine : "null"));
 
