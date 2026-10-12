@@ -141,13 +141,18 @@ public class MainActivity extends Activity {
     private class ServerRunnable implements Runnable {
         public void run() {
             try {
-                log("Ожидание подключений...");
+                log("Ожидание подключений (insecure mode)...");
+                
+                // ИСПОЛЬЗУЕМ INSECURE ВЕРСИЮ для совместимости со старыми устройствами
                 serverSocket = BluetoothAdapter.getDefaultAdapter()
-                        .listenUsingRfcommWithServiceRecord("BTProxy", SPP_UUID);
+                        .listenUsingInsecureRfcommWithServiceRecord("BTProxy", SPP_UUID);
+                
+                log("Сервер слушает на UUID: " + SPP_UUID.toString());
                 
                 while (isRunning) {
+                    log("accept() - жду соединение...");
                     BluetoothSocket clientSocket = serverSocket.accept();
-                    log("Клиент подключился!");
+                    log("Клиент подключился! Запускаю обработчик...");
                     new Thread(new ClientHandler(clientSocket)).start();
                 }
             } catch (Exception e) {
@@ -162,29 +167,26 @@ public class MainActivity extends Activity {
 
         public void run() {
             try {
+                log("Получаю InputStream...");
                 InputStream in = clientSocket.getInputStream();
+                log("Получаю OutputStream...");
                 OutputStream out = clientSocket.getOutputStream();
 
                 // Читаем запрос побайтово до \r\n\r\n (конец заголовков HTTP)
                 StringBuilder sb = new StringBuilder();
-                byte[] buffer = new byte[1];
                 int b;
-                int doubleCRLFCount = 0;
+                int crlfCount = 0;
                 while ((b = in.read()) != -1) {
                     char c = (char) b;
                     sb.append(c);
                     
-                    if (c == '\r') {
-                        doubleCRLFCount++;
-                    } else if (c == '\n' && doubleCRLFCount % 2 == 1) {
-                        doubleCRLFCount++;
-                    } else {
-                        doubleCRLFCount = 0;
-                    }
-                    
-                    // Если нашли конец заголовков (\r\n\r\n)
-                    if (doubleCRLFCount >= 4) {
-                        break;
+                    if (c == '\n') {
+                        crlfCount++;
+                        if (crlfCount >= 2) {
+                            break;
+                        }
+                    } else if (c != '\r') {
+                        crlfCount = 0;
                     }
                 }
 
