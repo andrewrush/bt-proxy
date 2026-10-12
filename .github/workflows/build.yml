@@ -19,6 +19,32 @@ jobs:
           javac -source 1.3 -target 1.3 \
             -bootclasspath j2me/lib/cldcapi11.jar:j2me/lib/midpapi20.jar \
             -d j2me/build/classes j2me/src/BTProxyMidlet.java
+      - name: Preverify with ProGuard
+        run: |
+          # Скачиваем и распаковываем ProGuard
+          wget -q -O j2me/lib/proguard.zip https://github.com/Guardsquare/proguard/releases/download/v7.3.2/proguard-7.3.2.zip
+          unzip -q -d j2me/lib/proguard j2me/lib/proguard.zip
+          
+          # Создаем конфиг для преверификации под KVM (Nokia S40)
+          cat > j2me/proguard.cfg << 'PGEOF'
+-injars j2me/build/classes
+-outjars j2me/build/preverified
+-libraryjars j2me/lib/cldcapi11.jar
+-libraryjars j2me/lib/midpapi20.jar
+-microedition
+-dontobfuscate
+-dontoptimize
+-dontshrink
+-preverify
+PGEOF
+          
+          # Запускаем преверификацию
+          java -jar j2me/lib/proguard/lib/proguard.jar @j2me/proguard.cfg
+          
+          # Проверяем версию байт-кода (должно быть 46 или 47, но НЕ 50+)
+          echo "--- Проверка версии байт-кода ---"
+          javap -verbose j2me/build/preverified/btproxy/BTProxyMidlet.class | grep "major version" || true
+          
       - name: Package JAR + JAD
         run: |
           echo "Manifest-Version: 1.0" > j2me/manifest.txt
@@ -30,10 +56,10 @@ jobs:
           echo "MicroEdition-Configuration: CLDC-1.1" >> j2me/manifest.txt
           echo "MIDlet-Permissions: javax.microedition.io.Connector.http,javax.microedition.io.Connector.https,javax.microedition.io.Connector.bluetooth" >> j2me/manifest.txt
           
-          jar cfm j2me/BTProxy.jar j2me/manifest.txt -C j2me/build/classes .
+          # ВАЖНО: берем классы из папки preverified, а не classes!
+          jar cfm j2me/BTProxy.jar j2me/manifest.txt -C j2me/build/preverified .
           
           JAR_SIZE=$(stat -c%s j2me/BTProxy.jar)
-          
           printf "MIDlet-Name: BTProxy\nMIDlet-Version: 1.0\nMIDlet-Vendor: andrewrush\nMIDlet-1: BTProxy,,btproxy.BTProxyMidlet\nMIDlet-Jar-URL: BTProxy.jar\nMIDlet-Jar-Size: %s\nMIDlet-Permissions: javax.microedition.io.Connector.http,javax.microedition.io.Connector.https,javax.microedition.io.Connector.bluetooth\n" "$JAR_SIZE" > j2me/BTProxy.jad
           
           echo "--- JAD CONTENT ---"
