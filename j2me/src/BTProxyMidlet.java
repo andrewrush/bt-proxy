@@ -64,14 +64,15 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
             if (mac == null) mac = "000000000000";
             mac = mac.trim().toUpperCase();
             
-            // ИСПРАВЛЕНИЕ: Перебираем каналы в ОБРАТНОМ порядке (30 → 1)
-            // Android обычно назначает каналы с конца, а системные сервисы занимают начало
+            // ИСПРАВЛЕНИЕ: Secure mode с аутентификацией и шифрованием
+            // Это синхронизирует Nokia с Android, который слушает в secure mode
             Exception lastErr = null;
             
             for (int ch = 30; ch >= 1; ch--) {
                 try {
                     statusItem.setText("Ch " + ch + "/30...");
-                    String connStr = "btspp://" + mac + ":" + ch;
+                    // SECURE MODE: authenticate=true, encrypt=true
+                    String connStr = "btspp://" + mac + ":" + ch + ";authenticate=true;encrypt=true;master=false";
                     conn = (StreamConnection) Connector.open(connStr, Connector.READ_WRITE, true);
                     statusItem.setText("Ch " + ch + " OK!");
                     break;

@@ -140,7 +140,7 @@ public class MainActivity extends Activity {
         BluetoothServerSocket socket = null;
         try {
             BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-            // ИСПОЛЬЗУЕМ SECURE MODE для совместимости с Android 12+
+            // SECURE MODE — синхронизирован с Nokia
             socket = adapter.listenUsingRfcommWithServiceRecord("BTProxy_" + channel, SPP_UUID);
             log("Канал " + channel + ": слушает (secure)");
             
@@ -185,12 +185,8 @@ public class MainActivity extends Activity {
                 InputStream in = clientSocket.getInputStream();
                 OutputStream out = clientSocket.getOutputStream();
                 
-                // ИСПРАВЛЕНИЕ: Ждём 1 секунду, чтобы Nokia успела отправить HTTP-запрос
-                log("[" + channel + "] Жду 1 секунду, чтобы Nokia отправила запрос...");
-                Thread.sleep(1000);
-                
+                // ЧИТАЕМ СРАЗУ, без задержки!
                 log("[" + channel + "] Читаю запрос...");
-                StringBuilder sb = new StringBuilder();
                 byte[] buffer = new byte[4096];
                 int bytesRead = in.read(buffer);
                 
@@ -229,10 +225,7 @@ public class MainActivity extends Activity {
                         log("[" + channel + "] Отправлено клиенту: " + total + " байт");
                         targetSocket.close();
                     } else {
-                        log("[" + channel + "] Не HTTP-запрос, отправляю тестовый ответ");
-                        String testResponse = "HTTP/1.1 200 OK\r\n\r\nTEST";
-                        out.write(testResponse.getBytes("UTF-8"));
-                        out.flush();
+                        log("[" + channel + "] Не HTTP-запрос");
                     }
                 } else {
                     log("[" + channel + "] Запрос не получен");
