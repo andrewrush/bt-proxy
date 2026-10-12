@@ -30,7 +30,6 @@ import javax.net.ssl.SSLSocketFactory;
 
 public class MainActivity extends Activity {
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
-    private static final int FIXED_CHANNEL = 2;
     
     private TextView tvInstructions, tvLogs;
     private Button btnStartStop, btnCopyLogs;
@@ -145,16 +144,21 @@ public class MainActivity extends Activity {
             try {
                 BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
                 
-                // ПЫТАЕМСЯ использовать скрытый метод для фиксированного канала
+                log("Слушаю через insecure метод...");
+                serverSocket = adapter.listenUsingInsecureRfcommWithServiceRecord("BTProxy", SPP_UUID);
+                
+                // Пытаемся узнать реальный канал через reflection
                 try {
-                    log("Попытка слушать на фиксированном канале " + FIXED_CHANNEL + "...");
-                    Method method = adapter.getClass().getMethod("listenUsingInsecureRfcommOn", int.class);
-                    serverSocket = (BluetoothServerSocket) method.invoke(adapter, FIXED_CHANNEL);
-                    log("Успех! Слушаем на канале " + FIXED_CHANNEL);
+                    Method getServiceRecord = serverSocket.getClass().getMethod("getServiceRecord");
+                    Object serviceRecord = getServiceRecord.invoke(serverSocket);
+                    if (serviceRecord != null) {
+                        Method getChannel = serviceRecord.getClass().getMethod("getChannel");
+                        int channel = (Integer) getChannel.invoke(serviceRecord);
+                        log("*** РЕАЛЬНЫЙ КАНАЛ СЕРВЕРА: " + channel + " ***");
+                        log("*** Введите этот номер в J2ME вместо перебора! ***");
+                    }
                 } catch (Exception e) {
-                    log("Reflection не сработал: " + e.getMessage());
-                    log("Fallback на стандартный insecure метод...");
-                    serverSocket = adapter.listenUsingInsecureRfcommWithServiceRecord("BTProxy", SPP_UUID);
+                    log("Не удалось узнать канал: " + e.getMessage());
                 }
                 
                 log("Сервер слушает...");
@@ -182,7 +186,6 @@ public class MainActivity extends Activity {
                 log("Получаю OutputStream...");
                 OutputStream out = clientSocket.getOutputStream();
 
-                // Читаем запрос побайтово до \r\n\r\n (конец заголовков HTTP)
                 StringBuilder sb = new StringBuilder();
                 int b;
                 int crlfCount = 0;
@@ -192,9 +195,7 @@ public class MainActivity extends Activity {
                     
                     if (c == '\n') {
                         crlfCount++;
-                        if (crlfCount >= 2) {
-                            break;
-                        }
+                        if (crlfCount >= 2) break;
                     } else if (c != '\r') {
                         crlfCount = 0;
                     }

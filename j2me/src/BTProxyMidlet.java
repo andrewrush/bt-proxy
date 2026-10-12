@@ -64,17 +64,17 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
             if (mac == null) mac = "000000000000";
             mac = mac.trim().toUpperCase();
             
-            // ИСПРАВЛЕНИЕ: Убрали master=true/false, оставляем только канал
-            String[] channels = {"1", "2", "3", "4", "5"};
+            // Перебираем ВСЕ возможные RFCOMM каналы (1-30)
             Exception lastErr = null;
             
-            for (int i = 0; i < channels.length; i++) {
-                String ch = channels[i];
+            for (int ch = 1; ch <= 30; ch++) {
                 try {
-                    statusItem.setText("Trying ch " + ch + "...");
-                    // Минимальная строка подключения БЕЗ master=
-                    String connStr = "btspp://" + mac + ":" + ch + ";authenticate=false;encrypt=false";
-                    conn = (StreamConnection) Connector.open(connStr);
+                    statusItem.setText("Ch " + ch + "/30...");
+                    // Минимальные параметры - БЕЗ authenticate/encrypt/master
+                    String connStr = "btspp://" + mac + ":" + ch;
+                    conn = (StreamConnection) Connector.open(connStr, Connector.READ_WRITE, true);
+                    // Успех! Прерываем цикл.
+                    statusItem.setText("Ch " + ch + " OK!");
                     break;
                 } catch (Exception e) {
                     lastErr = e;
