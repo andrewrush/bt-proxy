@@ -9,7 +9,7 @@ import java.util.Vector;
 
 public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryListener, Runnable {
     private Display display;
-    private Form mainForm, resultForm;
+    private Form mainForm;
     private List deviceList;
     private TextField urlField;
     private StringItem statusItem;
@@ -22,31 +22,29 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
     private RemoteDevice selectedDevice;
     private String connectionURL;
 
-    // Стандартный SPP UUID, который использует наш Android-сервер
-    private static final UUID[] SEARCH_UUIDS = { 
-        new UUID("0000110100001000800000805F9B34FB", false) 
-    };
+    // ИСПРАВЛЕНИЕ 6: Короткий UUID надежнее на старых JVM
+    private static final UUID[] SEARCH_UUIDS = { new UUID(0x1101) };
+    // ИСПРАВЛЕНИЕ 5: Запрашиваем только ProtocolDescriptorList для скорости
+    private static final int[] ATTR_SET = { 0x0100 };
 
     public BTProxyMidlet() {
         display = Display.getDisplay(this);
         
-        exitCmd = new Command("Выход", Command.EXIT, 1);
-        searchCmd = new Command("Найти сервер", Command.OK, 1);
-        connectCmd = new Command("Подключиться", Command.OK, 1);
-        backCmd = new Command("Назад", Command.BACK, 1);
+        exitCmd = new Command("Exit", Command.EXIT, 1);
+        searchCmd = new Command("Find Android", Command.OK, 1);
+        connectCmd = new Command("Connect", Command.OK, 1);
+        backCmd = new Command("Back", Command.BACK, 1);
 
-        // Главный экран
-        mainForm = new Form("BT Proxy");
+        mainForm = new Form("BT Proxy Client");
         urlField = new TextField("URL:", "http://neverssl.com", 100, TextField.ANY);
-        statusItem = new StringItem("Статус:", "Нажмите 'Найти сервер'");
+        statusItem = new StringItem("Status:", "Press 'Find Android'");
         mainForm.append(urlField);
         mainForm.append(statusItem);
         mainForm.addCommand(searchCmd);
         mainForm.addCommand(exitCmd);
         mainForm.setCommandListener(this);
 
-        // Список найденных устройств
-        deviceList = new List("Выберите устройство", List.IMPLICIT);
+        deviceList = new List("Select Android Device", List.IMPLICIT);
         deviceList.addCommand(connectCmd);
         deviceList.addCommand(backCmd);
         deviceList.setCommandListener(this);
@@ -56,8 +54,8 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
         try {
             LocalDevice local = LocalDevice.getLocalDevice();
             agent = local.getDiscoveryAgent();
-        } catch (BluetoothStateException e) {
-            statusItem.setText("Ошибка BT: " + e.toString());
+        } catch (Throwable t) {
+            statusItem.setText("BT Init Error: " + t.toString());
         }
         display.setCurrent(mainForm);
     }
@@ -69,14 +67,17 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
         if (c == exitCmd) {
             notifyDestroyed();
         } else if (c == searchCmd && d == mainForm) {
-            statusItem.setText("Поиск устройств...");
+            statusItem.setText("Scanning...");
+            // ИСПРАВЛЕНИЕ 4: Безопасная очистка списка для S40
+            while (deviceList.size() > 0) {
+                deviceList.delete(0);
+            }
             devices.removeAllElements();
             names.removeAllElements();
-            deviceList.deleteAll();
             try {
                 agent.startInquiry(DiscoveryAgent.GIAC, this);
-            } catch (BluetoothStateException e) {
-                statusItem.setText("Ошибка: " + e.toString());
+            } catch (Throwable t) {
+                statusItem.setText("Inquiry Error: " + t.toString());
             }
         } else if (c == backCmd && d == deviceList) {
             display.setCurrent(mainForm);
@@ -84,18 +85,17 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
             int idx = deviceList.getSelectedIndex();
             if (idx >= 0) {
                 selectedDevice = (RemoteDevice) devices.elementAt(idx);
-                statusItem.setText("Поиск сервиса на " + (String)names.elementAt(idx) + "...");
-                display.setCurrent(mainForm); // Возвращаемся на главный экран с индикатором
+                statusItem.setText("Searching service on " + (String)names.elementAt(idx) + "...");
+                display.setCurrent(mainForm);
                 try {
-                    agent.searchServices(null, SEARCH_UUIDS, selectedDevice, this);
-                } catch (BluetoothStateException e) {
-                    statusItem.setText("Ошибка поиска: " + e.toString());
+                    agent.searchServices(ATTR_SET, SEARCH_UUIDS, selectedDevice, this);
+                } catch (Throwable t) {
+                    statusItem.setText("Search Error: " + t.toString());
                 }
             }
         }
     }
 
-    // --- DiscoveryListener: Поиск устройств ---
     public void deviceDiscovered(RemoteDevice btDevice, DeviceClass cod) {
         try {
             String name = btDevice.getFriendlyName(false);
@@ -107,9 +107,9 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
 
     public void inquiryCompleted(int discType) {
         if (devices.size() == 0) {
-            statusItem.setText("Устройства не найдены");
+            statusItem.setText("No devices found. Check BT.");
         } else {
-            deviceList.deleteAll();
+            while (deviceList.size() > 0) deviceList.delete(0);
             for (int i = 0; i < names.size(); i++) {
                 deviceList.append((String) names.elementAt(i), null);
             }
@@ -117,35 +117,29 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
         }
     }
 
-    // --- DiscoveryListener: Поиск сервисов ---
     public void servicesDiscovered(int transID, ServiceRecord[] servRecord) {
         if (servRecord != null && servRecord.length > 0) {
-            // Получаем готовую строку подключения от системы!
             connectionURL = servRecord[0].getConnectionURL(ServiceRecord.NOAUTHENTICATE_NOENCRYPT, false);
-            statusItem.setText("Сервис найден! Подключаюсь...");
-            
-            // Запускаем подключение в отдельном потоке
-            Thread t = new Thread(this);
-            t.start();
+            statusItem.setText("Service found! Connecting...");
+            new Thread(this).start();
         } else {
-            statusItem.setText("Сервис BTProxy не найден");
+            statusItem.setText("BTProxy service not found on device.");
         }
     }
 
     public void serviceSearchCompleted(int transID, int respCode) {
         if (respCode != DiscoveryListener.SERVICE_SEARCH_COMPLETED) {
-            statusItem.setText("Ошибка поиска сервиса: " + respCode);
+            statusItem.setText("Service search failed: " + respCode);
         }
     }
 
-    // --- Подключение и отправка данных ---
     public void run() {
         StreamConnection conn = null;
         InputStream is = null;
         OutputStream os = null;
         try {
             conn = (StreamConnection) Connector.open(connectionURL);
-            statusItem.setText("Подключено! Отправка...");
+            statusItem.setText("Connected! Sending URL...");
             
             os = conn.openOutputStream();
             is = conn.openInputStream();
@@ -165,17 +159,29 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
             os.write(req.getBytes("UTF-8"));
             os.flush();
             
-            byte[] buf = new byte[1024];
-            int len = is.read(buf);
-            if (len > 0) {
-                String resp = new String(buf, 0, len);
+            statusItem.setText("Waiting for response...");
+            
+            // ИСПРАВЛЕНИЕ 1: Потоковое чтение до конца (-1) с лимитом памяти S40
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buf = new byte[2048];
+            int total = 0;
+            int n;
+            while ((n = is.read(buf)) != -1) {
+                baos.write(buf, 0, n);
+                total += n;
+                if (total > 8192) break; // Защита от переполнения памяти на S40
+            }
+            
+            if (total > 0) {
+                String resp = new String(baos.toByteArray(), "UTF-8");
                 if (resp.length() > 400) resp = resp.substring(0, 400) + "\n...[cut]";
-                statusItem.setText("УСПЕХ:\n" + resp);
+                statusItem.setText("SUCCESS:\n" + resp);
             } else {
-                statusItem.setText("Пустой ответ");
+                statusItem.setText("Empty response from Android");
             }
         } catch (Throwable e) {
-            statusItem.setText("Ошибка: " + e.toString());
+            // КЛЮЧЕВОЕ: e.toString() покажет точную причину (например, таймаут или отказ в доступе)
+            statusItem.setText("Error: " + e.toString());
         } finally {
             try { if (is != null) is.close(); } catch (Throwable e) {}
             try { if (os != null) os.close(); } catch (Throwable e) {}

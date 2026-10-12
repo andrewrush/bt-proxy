@@ -17,15 +17,15 @@ import android.widget.Button;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.Socket;
+import java.net.HttpURLConnection;
 import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 import java.util.UUID;
-import javax.net.ssl.SSLSocketFactory;
 
 public class MainActivity extends Activity {
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
@@ -38,6 +38,7 @@ public class MainActivity extends Activity {
     private boolean isRunning = false;
     private BluetoothServerSocket serverSocket;
     private Thread serverThread;
+    private static final int PERMISSION_REQUEST_CODE = 1001;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -49,7 +50,7 @@ public class MainActivity extends Activity {
         
         tvInstructions = new TextView(this);
         tvInstructions.setTextSize(16);
-        tvInstructions.setText("ИНСТРУКЦИЯ (Legacy Mode):\n1. Сопрягите Nokia и этот телефон.\n2. На Nokia запустите поиск и выберите этот телефон.\n3. Нажмите СТАРТ ниже.");
+        tvInstructions.setText("ИНСТРУКЦИЯ:\n1. Сопрягите Nokia и этот телефон в настройках Bluetooth.\n2. Нажмите СТАРТ СЕРВЕРА ниже.\n3. На Nokia запустите приложение и нажмите 'Find Android', затем 'Connect'.");
         layout.addView(tvInstructions);
         
         btnStartStop = new Button(this);
@@ -58,7 +59,7 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 if (isRunning) stopServer();
-                else startServerLegacy();
+                else checkPermissionsAndStart();
             }
         });
         layout.addView(btnStartStop);
@@ -69,9 +70,8 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                ClipData clip = ClipData.newPlainText("BT Logs", tvLogs.getText());
-                clipboard.setPrimaryClip(clip);
-                Toast.makeText(MainActivity.this, "Логи скопированы!", Toast.LENGTH_SHORT).show();
+                clipboard.setPrimaryClip(ClipData.newPlainText("BT Logs", tvLogs.getText()));
+                Toast.makeText(MainActivity.this, "Скопировано!", Toast.LENGTH_SHORT).show();
             }
         });
         layout.addView(btnCopyLogs);
@@ -88,20 +88,38 @@ public class MainActivity extends Activity {
         handler = new Handler(Looper.getMainLooper());
     }
 
-    private void startServerLegacy() {
-        if (isRunning) return;
-        
-        // Простая проверка для очень старых Android (до 6.0 разрешения даются при установке)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (checkSelfPermission(android.Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED) {
-                log("ОШИБКА: Нет разрешения Bluetooth. Дайте его в настройках.");
+    private void checkPermissionsAndStart() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
+                checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                log("Запрос разрешений...");
+                requestPermissions(new String[]{
+                    android.Manifest.permission.BLUETOOTH_CONNECT,
+                    android.Manifest.permission.BLUETOOTH_SCAN
+                }, PERMISSION_REQUEST_CODE);
                 return;
             }
         }
+        startServer();
+    }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                log("Разрешения получены.");
+                startServer();
+            } else {
+                log("ОШИБКА: Нет разрешения Bluetooth!");
+            }
+        }
+    }
+
+    private void startServer() {
+        if (isRunning) return;
         isRunning = true;
         btnStartStop.setText("СТОП СЕРВЕРА");
-        log("Сервер запускается (Legacy Mode)...");
+        log("Сервер запускается (Real Proxy Mode)...");
         serverThread = new Thread(new ServerRunnable());
         serverThread.start();
     }
@@ -123,18 +141,17 @@ public class MainActivity extends Activity {
         public void run() {
             try {
                 log("Ожидание подключений...");
-                // Используем стандартный метод, который на старых Android отлично работает с J2ME
                 serverSocket = BluetoothAdapter.getDefaultAdapter()
                         .listenUsingRfcommWithServiceRecord("BTProxy", SPP_UUID);
                 
                 while (isRunning) {
-                    log("accept() - жду соединение...");
+                    log("accept() - жду соединение от Nokia...");
                     BluetoothSocket clientSocket = serverSocket.accept();
-                    log("*** КЛИЕНТ ПОДКЛЮЧИЛСЯ! ***");
+                    log("*** NOKIA ПОДКЛЮЧИЛАСЬ! ***");
                     new Thread(new ClientHandler(clientSocket)).start();
                 }
             } catch (Exception e) {
-                if (isRunning) log("Ошибка сервера: " + e.getMessage());
+                if (isRunning) log("Ошибка сервера: " + e.toString());
             }
         }
     }
@@ -148,65 +165,97 @@ public class MainActivity extends Activity {
                 InputStream in = clientSocket.getInputStream();
                 OutputStream out = clientSocket.getOutputStream();
 
-                log("Читаю запрос...");
-                byte[] buffer = new byte[4096];
-                int bytesRead = in.read(buffer);
-                
-                if (bytesRead > 0) {
-                    String request = new String(buffer, 0, bytesRead, "UTF-8");
-                    log("Получен запрос: " + request.substring(0, Math.min(request.length(), 100)));
-                    
-                    if (request.startsWith("GET http")) {
-                        String[] tokens = request.split(" ");
-                        URL url = new URL(tokens[1]);
-                        String host = url.getHost();
-                        int port = url.getPort() != -1 ? url.getPort() : (url.getProtocol().equals("https") ? 443 : 80);
-                        String path = url.getFile().isEmpty() ? "/" : url.getFile();
-
-                        log("Цель: " + host + ":" + port + path);
-
-                        Socket targetSocket = url.getProtocol().equals("https") ?
-                            SSLSocketFactory.getDefault().createSocket(host, port) : new Socket(host, port);
-
-                        OutputStream targetOut = targetSocket.getOutputStream();
-                        InputStream targetIn = targetSocket.getInputStream();
-
-                        targetOut.write(("GET " + path + " HTTP/1.1\r\n").getBytes("UTF-8"));
-                        targetOut.write(("Host: " + host + "\r\n").getBytes("UTF-8"));
-                        targetOut.write("Connection: close\r\n\r\n".getBytes("UTF-8"));
-                        targetOut.flush();
-
-                        byte[] respBuffer = new byte[4096];
-                        int total = 0;
-                        int read;
-                        while ((read = targetIn.read(respBuffer)) != -1) {
-                            out.write(respBuffer, 0, read);
-                            out.flush();
-                            total += read;
-                        }
-                        log("Отправлено клиенту: " + total + " байт");
-                        targetSocket.close();
+                StringBuilder sb = new StringBuilder();
+                int b;
+                int crlfCount = 0;
+                while ((b = in.read()) != -1) {
+                    char c = (char) b;
+                    sb.append(c);
+                    if (c == '\n') {
+                        crlfCount++;
+                        if (crlfCount >= 2) break;
+                    } else if (c != '\r') {
+                        crlfCount = 0;
                     }
-                } else {
-                    log("Запрос не получен (соединение закрыто клиентом)");
+                }
+
+                String request = sb.toString().trim();
+                log("Получен запрос: " + request.substring(0, Math.min(request.length(), 80)));
+
+                if (request.startsWith("GET http")) {
+                    String[] tokens = request.split(" ");
+                    if (tokens.length >= 2) {
+                        String targetUrl = tokens[1];
+                        log("Fetching URL: " + targetUrl);
+
+                        URL url = new URL(targetUrl);
+                        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                        connection.setRequestMethod("GET");
+                        connection.setConnectTimeout(10000);
+                        connection.setReadTimeout(10000);
+                        
+                        int responseCode = connection.getResponseCode();
+                        log("Internet response code: " + responseCode);
+
+                        // ИСПРАВЛЕНИЕ 2: Отправляем полные HTTP-заголовки
+                        String statusLine = "HTTP/1.1 " + responseCode + " " + connection.getResponseMessage() + "\r\n";
+                        out.write(statusLine.getBytes("UTF-8"));
+                        
+                        String contentType = connection.getContentType();
+                        if (contentType != null) {
+                            out.write(("Content-Type: " + contentType + "\r\n").getBytes("UTF-8"));
+                        }
+                        
+                        int contentLength = connection.getContentLength();
+                        if (contentLength >= 0) {
+                            out.write(("Content-Length: " + contentLength + "\r\n").getBytes("UTF-8"));
+                        }
+                        out.write("Connection: close\r\n\r\n".getBytes("UTF-8"));
+                        out.flush();
+
+                        // ИСПРАВЛЕНИЕ 3: Корректная обработка потоков для 4xx/5xx ошибок
+                        InputStream internetIn;
+                        if (responseCode >= 400) {
+                            internetIn = connection.getErrorStream();
+                        } else {
+                            internetIn = connection.getInputStream();
+                        }
+                        if (internetIn == null) {
+                            internetIn = connection.getErrorStream();
+                            if (internetIn == null) {
+                                internetIn = new ByteArrayInputStream(new byte[0]);
+                            }
+                        }
+
+                        byte[] buffer = new byte[4096];
+                        int bytesRead;
+                        int total = 0;
+                        
+                        while ((bytesRead = internetIn.read(buffer)) != -1) {
+                            out.write(buffer, 0, bytesRead);
+                            out.flush();
+                            total += bytesRead;
+                        }
+                        log("Отправлено Nokia: " + total + " байт реальных данных");
+                        internetIn.close();
+                    }
                 }
             } catch (Exception e) {
-                log("Ошибка обработки: " + e.getMessage());
+                log("Ошибка обработки: " + e.toString());
             } finally {
-                try { clientSocket.close(); } catch (Exception e) {}
-                log("Соединение закрыто");
+                try { 
+                    clientSocket.close();
+                } catch (Exception e) {}
+                log("Соединение с Nokia закрыто. Сервер продолжает слушать.");
             }
         }
     }
 
     private void log(final String msg) {
-        handler.post(new Runnable() {
-            @Override
-            public void run() {
-                String time = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
-                tvLogs.append("[" + time + "] " + msg + "\n");
-                scrollLogs.fullScroll(View.FOCUS_DOWN);
-            }
+        handler.post(() -> {
+            String time = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
+            tvLogs.append("[" + time + "] " + msg + "\n");
+            scrollLogs.fullScroll(View.FOCUS_DOWN);
         });
     }
 
