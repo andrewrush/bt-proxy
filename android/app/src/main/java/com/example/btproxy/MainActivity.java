@@ -46,14 +46,13 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        // Создаем интерфейс программно для простоты
         android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
         layout.setOrientation(android.widget.LinearLayout.VERTICAL);
         layout.setPadding(32, 32, 32, 32);
         
         tvInstructions = new TextView(this);
         tvInstructions.setTextSize(16);
-        tvInstructions.setText("ИНСТРУКЦИЯ:\n1. Сопрягите Nokia и этот телефон в настройках Bluetooth.\n2. На Nokia откройте приложение, нажмите 'Настроить' и введите MAC-адрес ЭТОГО телефона (12 символов, БЕЗ двоеточий).\n3. Нажмите 'СТАРТ' ниже.\n4. На Nokia нажмите 'Загрузить'.");
+        tvInstructions.setText("ИНСТРУКЦИЯ:\n1. Сопрягите устройства.\n2. Введите MAC этого телефона в J2ME.\n3. Нажмите СТАРТ ниже.\n4. В J2ME нажмите Connect.");
         layout.addView(tvInstructions);
         
         btnStartStop = new Button(this);
@@ -61,11 +60,8 @@ public class MainActivity extends Activity {
         btnStartStop.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (isRunning) {
-                    stopServer();
-                } else {
-                    checkPermissionsAndStart();
-                }
+                if (isRunning) stopServer();
+                else checkPermissionsAndStart();
             }
         });
         layout.addView(btnStartStop);
@@ -86,11 +82,10 @@ public class MainActivity extends Activity {
         scrollLogs = new ScrollView(this);
         tvLogs = new TextView(this);
         tvLogs.setTextSize(12);
-        tvLogs.setText("Ожидание запуска...\n");
+        tvLogs.setText("Ожидание...\n");
         scrollLogs.addView(tvLogs);
         layout.addView(scrollLogs, new android.widget.LinearLayout.LayoutParams(
-            android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 
-            0, 1.0f)); // Занимает все оставшееся место
+            android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.0f));
             
         setContentView(layout);
         handler = new Handler(Looper.getMainLooper());
@@ -118,8 +113,7 @@ public class MainActivity extends Activity {
                 log("Разрешения получены.");
                 startServer();
             } else {
-                log("ОШИБКА: Требуется разрешение Bluetooth!");
-                Toast.makeText(this, "Без разрешения Bluetooth не работает", Toast.LENGTH_LONG).show();
+                log("ОШИБКА: Нет разрешения Bluetooth!");
             }
         }
     }
@@ -129,7 +123,6 @@ public class MainActivity extends Activity {
         isRunning = true;
         btnStartStop.setText("СТОП СЕРВЕРА");
         log("Сервер запускается...");
-        
         serverThread = new Thread(new ServerRunnable());
         serverThread.start();
     }
@@ -137,7 +130,7 @@ public class MainActivity extends Activity {
     private void stopServer() {
         isRunning = false;
         btnStartStop.setText("СТАРТ СЕРВЕРА");
-        log("Остановка сервера...");
+        log("Остановка...");
         if (serverSocket != null) {
             try { serverSocket.close(); } catch (Exception e) {}
         }
@@ -160,9 +153,7 @@ public class MainActivity extends Activity {
                     new Thread(new ClientHandler(clientSocket)).start();
                 }
             } catch (Exception e) {
-                if (isRunning) {
-                    log("Ошибка сервера: " + e.getMessage());
-                }
+                if (isRunning) log("Ошибка сервера: " + e.getMessage());
             }
         }
     }
@@ -177,19 +168,26 @@ public class MainActivity extends Activity {
                 OutputStream out = clientSocket.getOutputStream();
                 BufferedReader reader = new BufferedReader(new InputStreamReader(in));
 
+                log("Чтение запроса...");
                 String requestLine = reader.readLine();
+                log("Получено: " + (requestLine != null ? requestLine : "null"));
+
                 if (requestLine != null && requestLine.startsWith("GET http")) {
                     String[] tokens = requestLine.split(" ");
+                    if (tokens.length < 2) {
+                        log("Ошибка: неверный формат URL");
+                        return;
+                    }
                     URL url = new URL(tokens[1]);
-                    
                     String host = url.getHost();
                     int port = url.getPort() != -1 ? url.getPort() : (url.getProtocol().equals("https") ? 443 : 80);
                     String path = url.getFile().isEmpty() ? "/" : url.getFile();
 
-                    log("Запрос: " + host + ":" + port);
+                    log("Цель: " + host + ":" + port + path);
 
                     Socket targetSocket = url.getProtocol().equals("https") ?
                         SSLSocketFactory.getDefault().createSocket(host, port) : new Socket(host, port);
+                    log("Соединение с целью установлено");
 
                     OutputStream targetOut = targetSocket.getOutputStream();
                     InputStream targetIn = targetSocket.getInputStream();
@@ -201,20 +199,27 @@ public class MainActivity extends Activity {
                     }
                     targetOut.write("\r\n".getBytes("UTF-8"));
                     targetOut.flush();
+                    log("Запрос отправлен цели, жду ответ...");
 
                     byte[] buffer = new byte[4096];
                     int bytesRead;
+                    int total = 0;
                     while ((bytesRead = targetIn.read(buffer)) != -1) {
                         out.write(buffer, 0, bytesRead);
                         out.flush();
+                        total += bytesRead;
                     }
+                    log("Отправлено байт: " + total);
                     targetSocket.close();
-                    log("Ответ отправлен.");
+                } else {
+                    log("Игнорирован не-HTTP запрос: " + requestLine);
                 }
             } catch (Exception e) {
                 log("Ошибка обработки: " + e.getMessage());
+                e.printStackTrace();
             } finally {
                 try { clientSocket.close(); } catch (Exception e) {}
+                log("Соединение с клиентом закрыто");
             }
         }
     }
