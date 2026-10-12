@@ -64,16 +64,15 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
             if (mac == null) mac = "000000000000";
             mac = mac.trim().toUpperCase();
             
-            // Перебираем ВСЕ возможные RFCOMM каналы (1-30)
+            // ИСПРАВЛЕНИЕ: Перебираем каналы в ОБРАТНОМ порядке (30 → 1)
+            // Android обычно назначает каналы с конца, а системные сервисы занимают начало
             Exception lastErr = null;
             
-            for (int ch = 1; ch <= 30; ch++) {
+            for (int ch = 30; ch >= 1; ch--) {
                 try {
                     statusItem.setText("Ch " + ch + "/30...");
-                    // Минимальные параметры - БЕЗ authenticate/encrypt/master
                     String connStr = "btspp://" + mac + ":" + ch;
                     conn = (StreamConnection) Connector.open(connStr, Connector.READ_WRITE, true);
-                    // Успех! Прерываем цикл.
                     statusItem.setText("Ch " + ch + " OK!");
                     break;
                 } catch (Exception e) {
