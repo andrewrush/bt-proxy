@@ -21,33 +21,25 @@ jobs:
             -d j2me/build/classes j2me/src/BTProxyMidlet.java
       - name: Package JAR + JAD
         run: |
-          # Создаем манифест ВНЕ папки classes, чтобы он не попал внутрь JAR как файл
           cat > j2me/manifest.txt << 'MEOF'
-Manifest-Version: 1.0
-MIDlet-Name: BTProxy
-MIDlet-Version: 1.0
-MIDlet-Vendor: andrewrush
-MIDlet-1: BTProxy, , btproxy.BTProxyMidlet
-MicroEdition-Profile: MIDP-2.0
-MicroEdition-Configuration: CLDC-1.1
-MEOF
+          Manifest-Version: 1.0
+          MIDlet-Name: BTProxy
+          MIDlet-Version: 1.0
+          MIDlet-Vendor: andrewrush
+          MIDlet-1: BTProxy, , btproxy.BTProxyMidlet
+          MicroEdition-Profile: MIDP-2.0
+          MicroEdition-Configuration: CLDC-1.1
+          MEOF
           cd j2me/build/classes
-          # Упаковываем, используя внешний манифест
           jar cfm ../../BTProxy.jar ../../manifest.txt .
           cd ../..
-          
-          # Точный расчет размера
           JAR_SIZE=$(stat -c%s j2me/BTProxy.jar)
-          
-          # Генерируем JAD без спорных разрешений, с пробелом после запятой (требование некоторых парсеров S40)
           printf "MIDlet-Name: BTProxy\nMIDlet-Version: 1.0\nMIDlet-Vendor: andrewrush\nMIDlet-1: BTProxy, , btproxy.BTProxyMidlet\nMIDlet-Jar-URL: BTProxy.jar\nMIDlet-Jar-Size: %s\n" "$JAR_SIZE" > j2me/BTProxy.jad
-          
           echo "--- JAD CONTENT ---"
           cat j2me/BTProxy.jad
           echo "--- JAR CONTENTS ---"
           jar tf j2me/BTProxy.jar
           ls -l j2me/BTProxy.jar
-          
       - uses: actions/upload-artifact@v4
         with:
           name: j2me-midlet
