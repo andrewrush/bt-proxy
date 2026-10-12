@@ -30,6 +30,7 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         statusText = new TextView(this);
+        statusText.setTextSize(18); // Увеличенный шрифт для удобства чтения
         statusText.setText("Проверка разрешений...");
         setContentView(statusText);
         handler = new Handler();
@@ -59,7 +60,17 @@ public class MainActivity extends Activity {
     }
 
     private void startServerLogic() {
-        statusText.setText("Сервер запускается.\nВаш MAC-адрес Bluetooth можно узнать в:\nНастройки -> О телефоне -> Общая информация.");
+        String helpText = "СЕРВЕР ЗАПУЩЕН\n\n" +
+            "ИНСТРУКЦИЯ ДЛЯ NOKIA:\n" +
+            "1. Сопрягите устройства в настройках Bluetooth.\n" +
+            "2. Узнайте MAC-адрес ЭТОГО телефона в:\n" +
+            "   Настройки -> О телефоне -> Общая информация\n" +
+            "   (Выглядит как AA:BB:CC:DD:EE:FF)\n" +
+            "3. На Nokia нажмите 'Настроить' и введите\n" +
+            "   этот адрес из 12 символов БЕЗ двоеточий.\n" +
+            "   (Пример: AABBCCDDEEFF)";
+            
+        statusText.setText(helpText);
         new Thread(new ServerRunnable()).start();
     }
 

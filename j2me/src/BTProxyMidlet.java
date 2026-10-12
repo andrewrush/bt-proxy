@@ -4,67 +4,48 @@ import javax.microedition.midlet.*;
 import javax.microedition.lcdui.*;
 import javax.microedition.io.*;
 import javax.microedition.rms.*;
-import javax.bluetooth.*;
 import java.io.*;
-import java.util.Vector;
 
-public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryListener {
+public class BTProxyMidlet extends MIDlet implements CommandListener {
     private Display display;
-    private Form mainForm, manualForm;
-    private List deviceList;
+    private Form mainForm, setupForm;
     private TextField urlField, macField;
-    private StringItem resultItem;
-    
-    private Command exitCmd, goCmd, saveCmd, scanCmd, manualCmd, backCmd;
+    private StringItem resultItem, hintItem;
+    private Command exitCmd, goCmd, saveCmd;
     
     private static final String RMS_NAME = "BTProxySettings";
     private static final int BT_CHANNEL = 1;
     private String savedMac = null;
-    
-    private Vector foundDevices = new Vector();
-    private Vector foundNames = new Vector();
 
     public BTProxyMidlet() {
         display = Display.getDisplay(this);
-        
         exitCmd = new Command("Выход", Command.EXIT, 1);
         goCmd = new Command("Загрузить", Command.OK, 1);
         saveCmd = new Command("Сохранить", Command.OK, 1);
-        scanCmd = new Command("Найти устройства", Command.SCREEN, 1);
-        manualCmd = new Command("Ввести вручную", Command.SCREEN, 2);
-        backCmd = new Command("Назад", Command.BACK, 1);
 
-        // Главный экран
         mainForm = new Form("Bluetooth Proxy");
         urlField = new TextField("URL:", "http://example.com", 100, TextField.ANY);
-        resultItem = new StringItem("Сервер:", "не выбран");
+        resultItem = new StringItem("Сервер:", "не задан");
         mainForm.append(urlField);
         mainForm.append(resultItem);
         mainForm.addCommand(goCmd);
-        mainForm.addCommand(scanCmd);
-        mainForm.addCommand(manualCmd);
+        mainForm.addCommand(new Command("Настроить", Command.SCREEN, 1));
         mainForm.addCommand(exitCmd);
         mainForm.setCommandListener(this);
 
-        // Экран ручного ввода (fallback)
-        manualForm = new Form("Ввод MAC");
-        macField = new TextField("MAC (12 hex):", "", 12, TextField.ANY);
-        manualForm.append(new StringItem("", "Пример: AABBCCDDEEFF\n(без двоеточий)"));
-        manualForm.append(macField);
-        manualForm.addCommand(saveCmd);
-        manualForm.addCommand(backCmd);
-        manualForm.setCommandListener(this);
-
-        // Список найденных устройств
-        deviceList = new List("Выберите сервер", List.IMPLICIT);
-        deviceList.addCommand(saveCmd);
-        deviceList.addCommand(backCmd);
-        deviceList.setCommandListener(this);
+        setupForm = new Form("Настройка MAC");
+        hintItem = new StringItem("", "Введите MAC Android-телефона\n(12 символов, БЕЗ двоеточий)\nПример: AABBCCDDEEFF");
+        macField = new TextField("", "", 12, TextField.ANY);
+        setupForm.append(hintItem);
+        setupForm.append(macField);
+        setupForm.addCommand(saveCmd);
+        setupForm.addCommand(new Command("Назад", Command.BACK, 1));
+        setupForm.setCommandListener(this);
     }
 
     protected void startApp() { 
         savedMac = loadMacFromRMS();
-        updateServerInfo();
+        updateStatus();
         display.setCurrent(mainForm);
     }
     
@@ -74,97 +55,41 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
     public void commandAction(Command c, Displayable d) {
         if (c == exitCmd) {
             notifyDestroyed();
+        } else if (c.getCommandType() == Command.SCREEN && d == mainForm) {
+            macField.setString(savedMac != null ? savedMac : "");
+            display.setCurrent(setupForm);
+        } else if (c == saveCmd && d == setupForm) {
+            String mac = macField.getString().trim().toUpperCase();
+            if (mac.length() == 12 && isHex(mac)) {
+                saveMacToRMS(mac);
+                savedMac = mac;
+                updateStatus();
+                display.setCurrent(mainForm);
+            } else {
+                Alert a = new Alert("Ошибка", "Нужно ровно 12 символов (0-9, A-F)", null, AlertType.ERROR);
+                a.setTimeout(2000);
+                display.setCurrent(a, setupForm);
+            }
+        } else if (c.getCommandType() == Command.BACK && d == setupForm) {
+            display.setCurrent(mainForm);
         } else if (c == goCmd && d == mainForm) {
             if (savedMac == null) {
-                alert("Внимание", "Сначала выберите сервер (кнопка 'Найти устройства')");
+                Alert a = new Alert("Внимание", "Сначала нажмите 'Настроить' и введите MAC", null, AlertType.WARNING);
+                a.setTimeout(2000);
+                display.setCurrent(a, mainForm);
                 return;
             }
             resultItem.setText("Загрузка...");
             new Thread(new Runnable() {
                 public void run() { connectAndFetch(); }
             }).start();
-        } else if (c == scanCmd && d == mainForm) {
-            startInquiry();
-        } else if (c == manualCmd && d == mainForm) {
-            macField.setString(savedMac != null ? savedMac : "");
-            display.setCurrent(manualForm);
-        } else if (c == saveCmd && d == manualForm) {
-            String mac = macField.getString().trim().toUpperCase();
-            if (mac.length() == 12 && isHexString(mac)) {
-                saveMacToRMS(mac);
-                savedMac = mac;
-                updateServerInfo();
-                display.setCurrent(mainForm);
-            } else {
-                alert("Ошибка", "Введите 12 hex-символов (0-9, A-F)");
-            }
-        } else if (c == saveCmd && d == deviceList) {
-            int idx = deviceList.getSelectedIndex();
-            if (idx >= 0 && idx < foundDevices.size()) {
-                String mac = (String) foundDevices.elementAt(idx);
-                saveMacToRMS(mac);
-                savedMac = mac;
-                updateServerInfo();
-                display.setCurrent(mainForm);
-            }
-        } else if (c == backCmd) {
-            display.setCurrent(mainForm);
         }
     }
 
-    private void updateServerInfo() {
-        if (savedMac != null) {
-            resultItem.setText("MAC: " + savedMac);
-        } else {
-            resultItem.setText("не выбран");
-        }
+    private void updateStatus() {
+        resultItem.setText(savedMac != null ? "OK: " + savedMac : "не задан");
     }
 
-    private void startInquiry() {
-        foundDevices.removeAllElements();
-        foundNames.removeAllElements();
-        deviceList.deleteAll();
-        deviceList.append("Поиск устройств...", null);
-        display.setCurrent(deviceList);
-        
-        try {
-            LocalDevice local = LocalDevice.getLocalDevice();
-            DiscoveryAgent agent = local.getDiscoveryAgent();
-            agent.startInquiry(DiscoveryAgent.GIAC, this);
-        } catch (Exception e) {
-            alert("Ошибка", "Не удалось запустить поиск: " + e.getMessage());
-            display.setCurrent(mainForm);
-        }
-    }
-
-    // --- DiscoveryListener callbacks ---
-    public void deviceDiscovered(RemoteDevice dev, DeviceClass cod) {
-        try {
-            String addr = dev.getBluetoothAddress();
-            String name = dev.getFriendlyName(false);
-            if (name == null || name.length() == 0) name = addr;
-            foundDevices.addElement(addr);
-            foundNames.addElement(name);
-        } catch (Exception e) {
-            // игнорируем проблемные устройства
-        }
-    }
-
-    public void inquiryCompleted(int discType) {
-        deviceList.deleteAll();
-        if (foundDevices.size() == 0) {
-            deviceList.append("(устройств не найдено)", null);
-        } else {
-            for (int i = 0; i < foundNames.size(); i++) {
-                deviceList.append((String) foundNames.elementAt(i), null);
-            }
-        }
-    }
-
-    public void servicesDiscovered(int t, ServiceRecord[] r) {}
-    public void serviceSearchCompleted(int t, int r) {}
-
-    // --- Сетевое подключение ---
     private void connectAndFetch() {
         StreamConnection conn = null;
         InputStream is = null;
@@ -175,8 +100,9 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
                 url = "http://" + url;
             }
 
+            // master=false часто стабильнее работает на S40 при подключении к Android-серверу
             String connUrl = "btspp://" + savedMac + ":" + BT_CHANNEL + 
-                             ";authenticate=false;encrypt=false;master=true";
+                             ";authenticate=false;encrypt=false;master=false";
             
             conn = (StreamConnection) Connector.open(connUrl);
             os = conn.openOutputStream();
@@ -222,7 +148,7 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
         return slash > 0 ? h.substring(0, slash) : h;
     }
 
-    private boolean isHexString(String s) {
+    private boolean isHex(String s) {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
             if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F'))) return false;
@@ -230,13 +156,11 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
         return true;
     }
 
-    // --- RMS ---
     private String loadMacFromRMS() {
         try {
             RecordStore rs = RecordStore.openRecordStore(RMS_NAME, false);
             if (rs.getNumRecords() > 0) {
-                byte[] data = rs.getRecord(1);
-                String mac = new String(data, "UTF-8");
+                String mac = new String(rs.getRecord(1), "UTF-8");
                 rs.closeRecordStore();
                 return mac;
             }
@@ -252,14 +176,6 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
             if (rs.getNumRecords() > 0) rs.setRecord(1, data, 0, data.length);
             else rs.addRecord(data, 0, data.length);
             rs.closeRecordStore();
-        } catch (Exception e) {
-            alert("Ошибка", "Не удалось сохранить: " + e.getMessage());
-        }
-    }
-
-    private void alert(String title, String msg) {
-        Alert a = new Alert(title, msg, null, AlertType.ERROR);
-        a.setTimeout(Alert.FOREVER);
-        display.setCurrent(a);
+        } catch (Exception e) {}
     }
 }
