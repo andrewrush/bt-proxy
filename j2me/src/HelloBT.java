@@ -4,11 +4,9 @@ import javax.bluetooth.*;
 
 public class HelloBT extends MIDlet {
     private Form form;
-    
     public HelloBT() {
         form = new Form("BT Test");
     }
-    
     protected void startApp() {
         try {
             LocalDevice local = LocalDevice.getLocalDevice();
@@ -18,7 +16,6 @@ public class HelloBT extends MIDlet {
         }
         Display.getDisplay(this).setCurrent(form);
     }
-    
     protected void pauseApp() {}
     protected void destroyApp(boolean b) {}
 }
