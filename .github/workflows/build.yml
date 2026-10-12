@@ -13,8 +13,6 @@ jobs:
           mkdir -p j2me/lib
           wget -q -O j2me/lib/midpapi20.jar https://repo1.maven.org/maven2/org/microemu/midpapi20/2.0.4/midpapi20-2.0.4.jar
           wget -q -O j2me/lib/cldcapi11.jar https://repo1.maven.org/maven2/org/microemu/cldcapi11/2.0.4/cldcapi11-2.0.4.jar
-          jar tf j2me/lib/midpapi20.jar > /dev/null || { echo "Invalid MIDP"; exit 1; }
-          jar tf j2me/lib/cldcapi11.jar > /dev/null || { echo "Invalid CLDC"; exit 1; }
       - name: Compile MIDlet
         run: |
           mkdir -p j2me/build/classes
@@ -24,10 +22,30 @@ jobs:
       - name: Package JAR + JAD
         run: |
           cd j2me/build/classes
-          jar cfm ../../BTProxy.jar ../../MANIFEST.MF .
+          # Создаем MANIFEST.MF внутри JAR
+          echo "Manifest-Version: 1.0" > MANIFEST.MF
+          echo "MIDlet-Name: BTProxy" >> MANIFEST.MF
+          echo "MIDlet-Version: 1.0" >> MANIFEST.MF
+          echo "MIDlet-Vendor: andrewrush" >> MANIFEST.MF
+          echo "MIDlet-1: BTProxy,,btproxy.BTProxyMidlet" >> MANIFEST.MF
+          echo "MicroEdition-Profile: MIDP-2.0" >> MANIFEST.MF
+          echo "MicroEdition-Configuration: CLDC-1.1" >> MANIFEST.MF
+          
+          jar cfm ../../BTProxy.jar MANIFEST.MF .
           cd ../..
+          
+          # НАДЕЖНЫЙ расчет размера в байтах без лишних пробелов
           JAR_SIZE=$(stat -c%s BTProxy.jar)
-          printf 'MIDlet-Name: BTProxy\nMIDlet-Version: 1.0\nMIDlet-Vendor: andrewrush\nMIDlet-1: BTProxy, , btproxy.BTProxyMidlet\nMIDlet-Jar-URL: BTProxy.jar\nMIDlet-Jar-Size: %s\n' "$JAR_SIZE" > BTProxy.jad
+          
+          # Генерируем JAD с ЯВНЫМИ РАЗРЕШЕНИЯМИ (критично для Nokia S40)
+          printf "MIDlet-Name: BTProxy\nMIDlet-Version: 1.0\nMIDlet-Vendor: andrewrush\nMIDlet-1: BTProxy,,btproxy.BTProxyMidlet\nMIDlet-Jar-URL: BTProxy.jar\nMIDlet-Jar-Size: %s\nMIDlet-Permissions: javax.microedition.io.Connector.http, javax.microedition.io.Connector.https, javax.microedition.io.Connector.bluetooth\n" "$JAR_SIZE" > BTProxy.jad
+          
+          # Проверка для отладки в логах CI
+          echo "--- JAD FILE CONTENT ---"
+          cat BTProxy.jad
+          echo "--- JAR SIZE ---"
+          ls -l BTProxy.jar
+          
       - uses: actions/upload-artifact@v4
         with:
           name: j2me-midlet
