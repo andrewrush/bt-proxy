@@ -22,14 +22,13 @@ import java.io.OutputStream;
 import java.net.Socket;
 import java.net.URL;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Date;
-import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import javax.net.ssl.SSLSocketFactory;
 
 public class MainActivity extends Activity {
+    // Используем стандартный SPP UUID
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     
     private TextView tvInstructions, tvLogs;
@@ -38,8 +37,8 @@ public class MainActivity extends Activity {
     private Handler handler;
     
     private boolean isRunning = false;
-    private List<BluetoothServerSocket> serverSockets = new ArrayList<>();
-    private List<Thread> serverThreads = new ArrayList<>();
+    private BluetoothServerSocket serverSocket;
+    private Thread serverThread;
     private static final int PERMISSION_REQUEST_CODE = 1001;
 
     @Override
@@ -52,7 +51,7 @@ public class MainActivity extends Activity {
         
         tvInstructions = new TextView(this);
         tvInstructions.setTextSize(16);
-        tvInstructions.setText("ИНСТРУКЦИЯ:\n1. Сопрягите устройства.\n2. Введите MAC этого телефона в J2ME.\n3. Нажмите СТАРТ ниже.\n4. В J2ME нажмите Connect.");
+        tvInstructions.setText("ИНСТРУКЦИЯ:\n1. Сопрягите устройства.\n2. На Nokia введите URL: http://neverssl.com\n3. Нажмите СТАРТ ниже.\n4. На Nokia нажмите Connect.");
         layout.addView(tvInstructions);
         
         btnStartStop = new Button(this);
@@ -122,77 +121,60 @@ public class MainActivity extends Activity {
         if (isRunning) return;
         isRunning = true;
         btnStartStop.setText("СТОП СЕРВЕРА");
-        log("Сервер запускается...");
-        
-        for (int ch = 6; ch <= 30; ch++) {
-            final int channel = ch;
-            Thread t = new Thread(new Runnable() {
-                public void run() {
-                    startListenerOnChannel(channel);
-                }
-            });
-            t.start();
-            serverThreads.add(t);
-        }
-    }
-
-    private void startListenerOnChannel(int channel) {
-        BluetoothServerSocket socket = null;
-        try {
-            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-            // SECURE MODE — синхронизирован с Nokia
-            socket = adapter.listenUsingRfcommWithServiceRecord("BTProxy_" + channel, SPP_UUID);
-            log("Канал " + channel + ": слушает (secure)");
-            
-            serverSockets.add(socket);
-            
-            while (isRunning) {
-                BluetoothSocket clientSocket = socket.accept();
-                log("*** КЛИЕНТ НА КАНАЛЕ " + channel + "! ***");
-                new Thread(new ClientHandler(clientSocket, channel)).start();
-            }
-        } catch (Exception e) {
-            if (isRunning) log("Канал " + channel + ": ошибка - " + e.getMessage());
-        }
+        log("Сервер запускается (Стандартный SPP)...");
+        serverThread = new Thread(new ServerRunnable());
+        serverThread.start();
     }
 
     private void stopServer() {
         isRunning = false;
         btnStartStop.setText("СТАРТ СЕРВЕРА");
         log("Остановка...");
-        for (BluetoothServerSocket s : serverSockets) {
-            try { s.close(); } catch (Exception e) {}
+        if (serverSocket != null) {
+            try { serverSocket.close(); } catch (Exception e) {}
         }
-        serverSockets.clear();
-        for (Thread t : serverThreads) {
-            try { t.interrupt(); } catch (Exception e) {}
+        if (serverThread != null) {
+            try { serverThread.interrupt(); } catch (Exception e) {}
         }
-        serverThreads.clear();
         log("Сервер остановлен.");
+    }
+
+    private class ServerRunnable implements Runnable {
+        public void run() {
+            try {
+                log("Ожидание подключений...");
+                // ТОЛЬКО стандартный публичный API, как в Serial Bluetooth Terminal
+                serverSocket = BluetoothAdapter.getDefaultAdapter()
+                        .listenUsingRfcommWithServiceRecord("BTProxy", SPP_UUID);
+                
+                while (isRunning) {
+                    log("accept() - жду соединение...");
+                    BluetoothSocket clientSocket = serverSocket.accept();
+                    log("*** КЛИЕНТ ПОДКЛЮЧИЛСЯ! ***");
+                    new Thread(new ClientHandler(clientSocket)).start();
+                }
+            } catch (Exception e) {
+                if (isRunning) log("Ошибка сервера: " + e.getMessage());
+            }
+        }
     }
 
     private class ClientHandler implements Runnable {
         private BluetoothSocket clientSocket;
-        private int channel;
-        public ClientHandler(BluetoothSocket socket, int ch) { 
-            this.clientSocket = socket; 
-            this.channel = ch;
-        }
+        public ClientHandler(BluetoothSocket socket) { this.clientSocket = socket; }
 
         public void run() {
             try {
-                log("[" + channel + "] Получаю потоки...");
                 InputStream in = clientSocket.getInputStream();
                 OutputStream out = clientSocket.getOutputStream();
-                
-                // ЧИТАЕМ СРАЗУ, без задержки!
-                log("[" + channel + "] Читаю запрос...");
+
+                log("Читаю запрос...");
                 byte[] buffer = new byte[4096];
                 int bytesRead = in.read(buffer);
                 
                 if (bytesRead > 0) {
                     String request = new String(buffer, 0, bytesRead, "UTF-8");
-                    log("[" + channel + "] Получен запрос (" + bytesRead + " байт): " + request.substring(0, Math.min(request.length(), 100)));
+                    log("Получен запрос: " + request.substring(0, Math.min(request.length(), 100)));
                     
                     if (request.startsWith("GET http")) {
                         String[] tokens = request.split(" ");
@@ -201,7 +183,7 @@ public class MainActivity extends Activity {
                         int port = url.getPort() != -1 ? url.getPort() : (url.getProtocol().equals("https") ? 443 : 80);
                         String path = url.getFile().isEmpty() ? "/" : url.getFile();
 
-                        log("[" + channel + "] Цель: " + host + ":" + port + path);
+                        log("Цель: " + host + ":" + port + path);
 
                         Socket targetSocket = url.getProtocol().equals("https") ?
                             SSLSocketFactory.getDefault().createSocket(host, port) : new Socket(host, port);
@@ -222,20 +204,17 @@ public class MainActivity extends Activity {
                             out.flush();
                             total += read;
                         }
-                        log("[" + channel + "] Отправлено клиенту: " + total + " байт");
+                        log("Отправлено клиенту: " + total + " байт");
                         targetSocket.close();
-                    } else {
-                        log("[" + channel + "] Не HTTP-запрос");
                     }
                 } else {
-                    log("[" + channel + "] Запрос не получен");
+                    log("Запрос не получен (соединение закрыто клиентом)");
                 }
-                
             } catch (Exception e) {
-                log("[" + channel + "] Ошибка: " + e.getMessage());
+                log("Ошибка обработки: " + e.getMessage());
             } finally {
                 try { clientSocket.close(); } catch (Exception e) {}
-                log("[" + channel + "] Соединение закрыто");
+                log("Соединение закрыто");
             }
         }
     }
