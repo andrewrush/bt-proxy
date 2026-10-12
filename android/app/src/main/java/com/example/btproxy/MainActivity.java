@@ -19,16 +19,12 @@ import android.widget.TextView;
 import android.widget.Toast;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.lang.reflect.Method;
-import java.net.Socket;
-import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
-import javax.net.ssl.SSLSocketFactory;
 
 public class MainActivity extends Activity {
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
@@ -125,7 +121,6 @@ public class MainActivity extends Activity {
         btnStartStop.setText("СТОП СЕРВЕРА");
         log("Сервер запускается...");
         
-        // Запускаем серверы на каналах 6-30 (пропуская 1-5, занятые системой)
         for (int ch = 6; ch <= 30; ch++) {
             final int channel = ch;
             Thread t = new Thread(new Runnable() {
@@ -142,17 +137,8 @@ public class MainActivity extends Activity {
         BluetoothServerSocket socket = null;
         try {
             BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-            
-            // Пытаемся использовать reflection для фиксации канала
-            try {
-                Method method = adapter.getClass().getMethod("listenUsingInsecureRfcommOn", int.class);
-                socket = (BluetoothServerSocket) method.invoke(adapter, channel);
-                log("Канал " + channel + ": слушает (reflection)");
-            } catch (Exception e) {
-                // Fallback: стандартный метод (канал выбирается системой)
-                socket = adapter.listenUsingInsecureRfcommWithServiceRecord("BTProxy_" + channel, SPP_UUID);
-                log("Канал " + channel + ": слушает (стандарт)");
-            }
+            socket = adapter.listenUsingInsecureRfcommWithServiceRecord("BTProxy_" + channel, SPP_UUID);
+            log("Канал " + channel + ": слушает");
             
             serverSockets.add(socket);
             
@@ -162,7 +148,7 @@ public class MainActivity extends Activity {
                 new Thread(new ClientHandler(clientSocket, channel)).start();
             }
         } catch (Exception e) {
-            log("Канал " + channel + ": ошибка - " + e.getMessage());
+            if (isRunning) log("Канал " + channel + ": ошибка - " + e.getMessage());
         }
     }
 
@@ -191,66 +177,34 @@ public class MainActivity extends Activity {
 
         public void run() {
             try {
-                log("[" + channel + "] Получаю InputStream...");
-                InputStream in = clientSocket.getInputStream();
+                log("[" + channel + "] Получаю OutputStream...");
                 OutputStream out = clientSocket.getOutputStream();
-
-                StringBuilder sb = new StringBuilder();
-                int b;
-                int newlineCount = 0;
-                int bytesRead = 0;
                 
-                while ((b = in.read()) != -1 && bytesRead < 4096) {
-                    char c = (char) b;
-                    sb.append(c);
-                    bytesRead++;
-                    
-                    if (c == '\n') {
-                        newlineCount++;
-                        if (newlineCount >= 2) break;
-                    } else if (c != '\r') {
-                        newlineCount = 0;
-                    }
+                // ИСПРАВЛЕНИЕ: Отправляем ТЕСТОВЫЙ ОТВЕТ НЕМЕДЛЕННО
+                log("[" + channel + "] Отправляю тестовый ответ...");
+                String testResponse = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nTEST RESPONSE FROM CHANNEL " + channel;
+                out.write(testResponse.getBytes("UTF-8"));
+                out.flush();
+                log("[" + channel + "] Тестовый ответ отправлен!");
+                
+                // Теперь пытаемся прочитать запрос (если Nokia ещё не закрыла соединение)
+                log("[" + channel + "] Пытаюсь прочитать запрос...");
+                InputStream in = clientSocket.getInputStream();
+                byte[] buffer = new byte[1024];
+                int bytesRead = in.read(buffer);
+                
+                if (bytesRead > 0) {
+                    String request = new String(buffer, 0, bytesRead, "UTF-8");
+                    log("[" + channel + "] Получен запрос: " + request.substring(0, Math.min(request.length(), 100)));
+                } else {
+                    log("[" + channel + "] Запрос не получен (Nokia закрыла соединение)");
                 }
-
-                String requestLine = sb.toString().trim();
-                log("[" + channel + "] Получено: " + requestLine.substring(0, Math.min(requestLine.length(), 100)));
-
-                if (requestLine.startsWith("GET http")) {
-                    String[] tokens = requestLine.split(" ");
-                    URL url = new URL(tokens[1]);
-                    String host = url.getHost();
-                    int port = url.getPort() != -1 ? url.getPort() : (url.getProtocol().equals("https") ? 443 : 80);
-                    String path = url.getFile().isEmpty() ? "/" : url.getFile();
-
-                    log("[" + channel + "] Цель: " + host + ":" + port + path);
-
-                    Socket targetSocket = url.getProtocol().equals("https") ?
-                        SSLSocketFactory.getDefault().createSocket(host, port) : new Socket(host, port);
-
-                    OutputStream targetOut = targetSocket.getOutputStream();
-                    InputStream targetIn = targetSocket.getInputStream();
-
-                    targetOut.write(("GET " + path + " HTTP/1.1\r\n").getBytes("UTF-8"));
-                    targetOut.write(("Host: " + host + "\r\n").getBytes("UTF-8"));
-                    targetOut.write("Connection: close\r\n\r\n".getBytes("UTF-8"));
-                    targetOut.flush();
-
-                    byte[] respBuffer = new byte[4096];
-                    int total = 0;
-                    int read;
-                    while ((read = targetIn.read(respBuffer)) != -1) {
-                        out.write(respBuffer, 0, read);
-                        out.flush();
-                        total += read;
-                    }
-                    log("[" + channel + "] Отправлено клиенту: " + total + " байт");
-                    targetSocket.close();
-                }
+                
             } catch (Exception e) {
                 log("[" + channel + "] Ошибка: " + e.getMessage());
             } finally {
                 try { clientSocket.close(); } catch (Exception e) {}
+                log("[" + channel + "] Соединение закрыто");
             }
         }
     }
