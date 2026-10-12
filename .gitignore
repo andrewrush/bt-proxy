@@ -1,0 +1,22 @@
+# Build outputs
+build/
+.gradle/
+*.class
+*.apk
+
+# JARs (кроме stub-библиотек J2ME)
+*.jar
+!j2me/lib/*.jar
+
+# Artifacts downloaded from CI
+artifacts/
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
