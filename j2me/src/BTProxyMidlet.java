@@ -64,7 +64,10 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
             if (mac == null) mac = "000000000000";
             mac = mac.trim().toUpperCase();
             
-            String connStr = "btspp://" + mac + ":1;authenticate=false;encrypt=false;master=false";
+            // ИСПРАВЛЕНИЕ: Используем UUID сервиса вместо жесткого канала :1
+            // Стандартный SPP UUID: 0000110100001000800000805F9B34FB
+            // master=true часто требуется Nokia при инициации соединения
+            String connStr = "btspp://" + mac + ":0000110100001000800000805F9B34FB;name=BTProxy;authenticate=false;encrypt=false;master=true";
             
             conn = (StreamConnection) Connector.open(connStr);
             os = conn.openOutputStream();
@@ -90,7 +93,6 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
                 statusItem.setText("Empty response");
             }
         } catch (Exception e) {
-            // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: если getMessage() возвращает null, показываем имя класса ошибки
             String errMsg = e.getMessage();
             if (errMsg == null || errMsg.trim().length() == 0) {
                 errMsg = e.getClass().getName();
