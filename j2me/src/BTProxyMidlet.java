@@ -21,7 +21,6 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
         display = Display.getDisplay(this);
         exitCommand = new Command("Выход", Command.EXIT, 1);
         
-        // Главный экран
         mainForm = new Form("Bluetooth Internet Proxy");
         urlField = new TextField("URL:", "http://example.com", 100, TextField.ANY);
         resultItem = new StringItem("Статус:", "Готово к работе");
@@ -33,7 +32,6 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
         mainForm.addCommand(exitCommand);
         mainForm.setCommandListener(this);
 
-        // Экран первоначальной настройки
         setupForm = new Form("Настройка Bluetooth");
         macField = new TextField("MAC сервера (12 hex):", "", 12, TextField.ANY);
         saveCommand = new Command("Сохранить", Command.OK, 1);
@@ -55,7 +53,6 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
     }
     
     protected void pauseApp() {}
-    
     protected void destroyApp(boolean unconditional) {}
 
     public void commandAction(Command c, Displayable d) {
@@ -63,8 +60,8 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
             notifyDestroyed();
         } else if (c == saveCommand && d == setupForm) {
             String mac = macField.getString().trim().toUpperCase();
-            // Простая валидация: только hex-символы и длина 12
-            if (mac.length() == 12 && mac.matches("[0-9A-F]+")) {
+            // Java 1.3 совместимая проверка на hex-символы
+            if (mac.length() == 12 && isHexString(mac)) {
                 saveMacToRMS(mac);
                 savedMac = mac;
                 display.setCurrent(mainForm);
@@ -138,7 +135,17 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
         return slash > 0 ? h.substring(0, slash) : h;
     }
 
-    // --- RMS (Record Management System) Методы ---
+    // Java 1.3 совместимая проверка строки на hex-символы
+    private boolean isHexString(String str) {
+        for (int i = 0; i < str.length(); i++) {
+            char c = str.charAt(i);
+            if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F'))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private String loadMacFromRMS() {
         try {
             RecordStore rs = RecordStore.openRecordStore(RMS_NAME, false);
@@ -150,7 +157,7 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
             }
             rs.closeRecordStore();
         } catch (Exception e) {
-            // Игнорируем ошибки при первом запуске (хранилище не создано)
+            // Игнорируем ошибки при первом запуске
         }
         return null;
     }
@@ -166,7 +173,7 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
             }
             rs.closeRecordStore();
         } catch (Exception e) {
-            alert("Ошибка сохранения", "Не удалось сохранить настройки: " + e.getMessage());
+            alert("Ошибка сохранения", "Не удалось сохранить: " + e.getMessage());
         }
     }
 
