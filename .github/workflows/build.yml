@@ -21,13 +21,10 @@ jobs:
             -d j2me/build/classes j2me/src/BTProxyMidlet.java
       - name: Preverify with ProGuard
         run: |
-          # Устанавливаем unzip (его нет в образе, но он нужен для надежной распаковки)
           apt-get update -qq && apt-get install -y -qq unzip
           
           mkdir -p j2me/lib/pg
           wget -q -O j2me/lib/pg/proguard.zip https://github.com/Guardsquare/proguard/releases/download/v7.3.2/proguard-7.3.2.zip
-          
-          # Распаковываем архив. Он создаст папку proguard-7.3.2 внутри j2me/lib/pg
           unzip -q -d j2me/lib/pg j2me/lib/pg/proguard.zip
           
           echo "-injars j2me/build/classes" > j2me/proguard.cfg
@@ -38,9 +35,8 @@ jobs:
           echo "-dontobfuscate" >> j2me/proguard.cfg
           echo "-dontoptimize" >> j2me/proguard.cfg
           echo "-dontshrink" >> j2me/proguard.cfg
-          echo "-preverify" >> j2me/proguard.cfg
+          # Опция -preverify удалена, так как она включена по умолчанию в современных версиях ProGuard
           
-          # Запускаем preverify с правильным путем к jar-файлу внутри распакованной папки
           java -jar j2me/lib/pg/proguard-7.3.2/lib/proguard.jar @j2me/proguard.cfg
           
           echo "--- Bytecode version check ---"
