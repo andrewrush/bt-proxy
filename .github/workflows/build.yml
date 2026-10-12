@@ -23,7 +23,8 @@ jobs:
         run: |
           mkdir -p j2me/lib/pg
           wget -q -O j2me/lib/pg/proguard.zip https://github.com/Guardsquare/proguard/releases/download/v7.3.2/proguard-7.3.2.zip
-          unzip -q -d j2me/lib/pg j2me/lib/pg/proguard.zip
+          # Используем jar вместо unzip, так как он гарантированно есть в JDK
+          cd j2me/lib/pg && jar xf proguard.zip && cd ../../..
           echo "-injars j2me/build/classes" > j2me/proguard.cfg
           echo "-outjars j2me/build/preverified" >> j2me/proguard.cfg
           echo "-libraryjars j2me/lib/cldcapi11.jar" >> j2me/proguard.cfg
