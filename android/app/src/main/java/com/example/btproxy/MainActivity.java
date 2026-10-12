@@ -19,6 +19,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Method;
 import java.net.Socket;
 import java.net.URL;
 import java.text.SimpleDateFormat;
@@ -29,6 +30,7 @@ import javax.net.ssl.SSLSocketFactory;
 
 public class MainActivity extends Activity {
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    private static final int FIXED_CHANNEL = 2;
     
     private TextView tvInstructions, tvLogs;
     private Button btnStartStop, btnCopyLogs;
@@ -141,13 +143,21 @@ public class MainActivity extends Activity {
     private class ServerRunnable implements Runnable {
         public void run() {
             try {
-                log("Ожидание подключений (insecure mode)...");
+                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
                 
-                // ИСПОЛЬЗУЕМ INSECURE ВЕРСИЮ для совместимости со старыми устройствами
-                serverSocket = BluetoothAdapter.getDefaultAdapter()
-                        .listenUsingInsecureRfcommWithServiceRecord("BTProxy", SPP_UUID);
+                // ПЫТАЕМСЯ использовать скрытый метод для фиксированного канала
+                try {
+                    log("Попытка слушать на фиксированном канале " + FIXED_CHANNEL + "...");
+                    Method method = adapter.getClass().getMethod("listenUsingInsecureRfcommOn", int.class);
+                    serverSocket = (BluetoothServerSocket) method.invoke(adapter, FIXED_CHANNEL);
+                    log("Успех! Слушаем на канале " + FIXED_CHANNEL);
+                } catch (Exception e) {
+                    log("Reflection не сработал: " + e.getMessage());
+                    log("Fallback на стандартный insecure метод...");
+                    serverSocket = adapter.listenUsingInsecureRfcommWithServiceRecord("BTProxy", SPP_UUID);
+                }
                 
-                log("Сервер слушает на UUID: " + SPP_UUID.toString());
+                log("Сервер слушает...");
                 
                 while (isRunning) {
                     log("accept() - жду соединение...");
