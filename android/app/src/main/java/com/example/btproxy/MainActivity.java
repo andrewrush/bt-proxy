@@ -4,40 +4,103 @@ import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothServerSocket;
 import android.bluetooth.BluetoothSocket;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
+import android.view.View;
+import android.widget.Button;
+import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.URL;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 import java.util.UUID;
 import javax.net.ssl.SSLSocketFactory;
 
 public class MainActivity extends Activity {
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
-    private TextView statusText;
+    
+    private TextView tvInstructions, tvLogs;
+    private Button btnStartStop, btnCopyLogs;
+    private ScrollView scrollLogs;
     private Handler handler;
-    private boolean isRunning = true;
+    
+    private boolean isRunning = false;
     private BluetoothServerSocket serverSocket;
+    private Thread serverThread;
     private static final int PERMISSION_REQUEST_CODE = 1001;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        statusText = new TextView(this);
-        statusText.setTextSize(18); // Увеличенный шрифт для удобства чтения
-        statusText.setText("Проверка разрешений...");
-        setContentView(statusText);
-        handler = new Handler();
+        
+        // Создаем интерфейс программно для простоты
+        android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
+        layout.setOrientation(android.widget.LinearLayout.VERTICAL);
+        layout.setPadding(32, 32, 32, 32);
+        
+        tvInstructions = new TextView(this);
+        tvInstructions.setTextSize(16);
+        tvInstructions.setText("ИНСТРУКЦИЯ:\n1. Сопрягите Nokia и этот телефон в настройках Bluetooth.\n2. На Nokia откройте приложение, нажмите 'Настроить' и введите MAC-адрес ЭТОГО телефона (12 символов, БЕЗ двоеточий).\n3. Нажмите 'СТАРТ' ниже.\n4. На Nokia нажмите 'Загрузить'.");
+        layout.addView(tvInstructions);
+        
+        btnStartStop = new Button(this);
+        btnStartStop.setText("СТАРТ СЕРВЕРА");
+        btnStartStop.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (isRunning) {
+                    stopServer();
+                } else {
+                    checkPermissionsAndStart();
+                }
+            }
+        });
+        layout.addView(btnStartStop);
+        
+        btnCopyLogs = new Button(this);
+        btnCopyLogs.setText("КОПИРОВАТЬ ЛОГИ");
+        btnCopyLogs.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                ClipData clip = ClipData.newPlainText("BT Logs", tvLogs.getText());
+                clipboard.setPrimaryClip(clip);
+                Toast.makeText(MainActivity.this, "Логи скопированы!", Toast.LENGTH_SHORT).show();
+            }
+        });
+        layout.addView(btnCopyLogs);
+        
+        scrollLogs = new ScrollView(this);
+        tvLogs = new TextView(this);
+        tvLogs.setTextSize(12);
+        tvLogs.setText("Ожидание запуска...\n");
+        scrollLogs.addView(tvLogs);
+        layout.addView(scrollLogs, new android.widget.LinearLayout.LayoutParams(
+            android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 
+            0, 1.0f)); // Занимает все оставшееся место
+            
+        setContentView(layout);
+        handler = new Handler(Looper.getMainLooper());
+    }
 
+    private void checkPermissionsAndStart() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
                 checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                log("Запрос разрешений...");
                 requestPermissions(new String[]{
                     android.Manifest.permission.BLUETOOTH_CONNECT,
                     android.Manifest.permission.BLUETOOTH_SCAN
@@ -45,58 +108,55 @@ public class MainActivity extends Activity {
                 return;
             }
         }
-        startServerLogic();
+        startServer();
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         if (requestCode == PERMISSION_REQUEST_CODE) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                startServerLogic();
+                log("Разрешения получены.");
+                startServer();
             } else {
-                statusText.setText("Ошибка: Требуется разрешение Bluetooth.");
+                log("ОШИБКА: Требуется разрешение Bluetooth!");
+                Toast.makeText(this, "Без разрешения Bluetooth не работает", Toast.LENGTH_LONG).show();
             }
         }
     }
 
-    private void startServerLogic() {
-        String helpText = "СЕРВЕР ЗАПУЩЕН\n\n" +
-            "ИНСТРУКЦИЯ ДЛЯ NOKIA:\n" +
-            "1. Сопрягите устройства в настройках Bluetooth.\n" +
-            "2. Узнайте MAC-адрес ЭТОГО телефона в:\n" +
-            "   Настройки -> О телефоне -> Общая информация\n" +
-            "   (Выглядит как AA:BB:CC:DD:EE:FF)\n" +
-            "3. На Nokia нажмите 'Настроить' и введите\n" +
-            "   этот адрес из 12 символов БЕЗ двоеточий.\n" +
-            "   (Пример: AABBCCDDEEFF)";
-            
-        statusText.setText(helpText);
-        new Thread(new ServerRunnable()).start();
+    private void startServer() {
+        if (isRunning) return;
+        isRunning = true;
+        btnStartStop.setText("СТОП СЕРВЕРА");
+        log("Сервер запускается...");
+        
+        serverThread = new Thread(new ServerRunnable());
+        serverThread.start();
     }
 
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
+    private void stopServer() {
         isRunning = false;
+        btnStartStop.setText("СТАРТ СЕРВЕРА");
+        log("Остановка сервера...");
         if (serverSocket != null) {
-            try {
-                serverSocket.close();
-            } catch (Exception e) {}
+            try { serverSocket.close(); } catch (Exception e) {}
         }
+        if (serverThread != null) {
+            try { serverThread.interrupt(); } catch (Exception e) {}
+        }
+        log("Сервер остановлен.");
     }
 
     private class ServerRunnable implements Runnable {
         public void run() {
             try {
-                log("Ожидание подключения...");
+                log("Ожидание подключений...");
                 serverSocket = BluetoothAdapter.getDefaultAdapter()
                         .listenUsingRfcommWithServiceRecord("BTProxy", SPP_UUID);
                 
-                log("Сервер запущен.");
-                
                 while (isRunning) {
                     BluetoothSocket clientSocket = serverSocket.accept();
-                    log("Клиент подключен!");
+                    log("Клиент подключился!");
                     new Thread(new ClientHandler(clientSocket)).start();
                 }
             } catch (Exception e) {
@@ -109,10 +169,7 @@ public class MainActivity extends Activity {
 
     private class ClientHandler implements Runnable {
         private BluetoothSocket clientSocket;
-
-        public ClientHandler(BluetoothSocket socket) {
-            this.clientSocket = socket;
-        }
+        public ClientHandler(BluetoothSocket socket) { this.clientSocket = socket; }
 
         public void run() {
             try {
@@ -123,28 +180,21 @@ public class MainActivity extends Activity {
                 String requestLine = reader.readLine();
                 if (requestLine != null && requestLine.startsWith("GET http")) {
                     String[] tokens = requestLine.split(" ");
-                    String fullUrl = tokens[1];
-                    URL url = new URL(fullUrl);
+                    URL url = new URL(tokens[1]);
                     
                     String host = url.getHost();
                     int port = url.getPort() != -1 ? url.getPort() : (url.getProtocol().equals("https") ? 443 : 80);
                     String path = url.getFile().isEmpty() ? "/" : url.getFile();
 
-                    log("Проксирование: " + host + ":" + port);
+                    log("Запрос: " + host + ":" + port);
 
-                    Socket targetSocket;
-                    if (url.getProtocol().equals("https")) {
-                        targetSocket = SSLSocketFactory.getDefault().createSocket(host, port);
-                    } else {
-                        targetSocket = new Socket(host, port);
-                    }
+                    Socket targetSocket = url.getProtocol().equals("https") ?
+                        SSLSocketFactory.getDefault().createSocket(host, port) : new Socket(host, port);
 
                     OutputStream targetOut = targetSocket.getOutputStream();
                     InputStream targetIn = targetSocket.getInputStream();
 
-                    String newRequest = "GET " + path + " HTTP/1.1\r\n";
-                    targetOut.write(newRequest.getBytes("UTF-8"));
-                    
+                    targetOut.write(("GET " + path + " HTTP/1.1\r\n").getBytes("UTF-8"));
                     String headerLine;
                     while ((headerLine = reader.readLine()) != null && headerLine.trim().length() > 0) {
                         targetOut.write((headerLine + "\r\n").getBytes("UTF-8"));
@@ -159,7 +209,7 @@ public class MainActivity extends Activity {
                         out.flush();
                     }
                     targetSocket.close();
-                    log("Запрос выполнен успешно.");
+                    log("Ответ отправлен.");
                 }
             } catch (Exception e) {
                 log("Ошибка обработки: " + e.getMessage());
@@ -173,8 +223,16 @@ public class MainActivity extends Activity {
         handler.post(new Runnable() {
             @Override
             public void run() {
-                statusText.setText(msg);
+                String time = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
+                tvLogs.append("[" + time + "] " + msg + "\n");
+                scrollLogs.fullScroll(View.FOCUS_DOWN);
             }
         });
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        stopServer();
     }
 }

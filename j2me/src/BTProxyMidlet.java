@@ -10,10 +10,10 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
     private Display display;
     private Form mainForm, setupForm;
     private TextField urlField, macField;
-    private StringItem resultItem, hintItem;
-    private Command exitCmd, goCmd, saveCmd;
+    private StringItem resultItem;
+    private Command exitCmd, goCmd, saveCmd, settingsCmd, backCmd;
     
-    private static final String RMS_NAME = "BTProxySettings";
+    private static final String RMS_NAME = "BTSettings";
     private static final int BT_CHANNEL = 1;
     private String savedMac = null;
 
@@ -22,6 +22,8 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
         exitCmd = new Command("Выход", Command.EXIT, 1);
         goCmd = new Command("Загрузить", Command.OK, 1);
         saveCmd = new Command("Сохранить", Command.OK, 1);
+        settingsCmd = new Command("Настроить", Command.SCREEN, 1);
+        backCmd = new Command("Назад", Command.BACK, 1);
 
         mainForm = new Form("Bluetooth Proxy");
         urlField = new TextField("URL:", "http://example.com", 100, TextField.ANY);
@@ -29,60 +31,55 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
         mainForm.append(urlField);
         mainForm.append(resultItem);
         mainForm.addCommand(goCmd);
-        mainForm.addCommand(new Command("Настроить", Command.SCREEN, 1));
+        mainForm.addCommand(settingsCmd);
         mainForm.addCommand(exitCmd);
         mainForm.setCommandListener(this);
 
         setupForm = new Form("Настройка MAC");
-        hintItem = new StringItem("", "Введите MAC Android-телефона\n(12 символов, БЕЗ двоеточий)\nПример: AABBCCDDEEFF");
+        setupForm.append("Введите MAC Android (12 символов, БЕЗ :)\nПример: AABBCCDDEEFF");
         macField = new TextField("", "", 12, TextField.ANY);
-        setupForm.append(hintItem);
         setupForm.append(macField);
         setupForm.addCommand(saveCmd);
-        setupForm.addCommand(new Command("Назад", Command.BACK, 1));
+        setupForm.addCommand(backCmd);
         setupForm.setCommandListener(this);
     }
 
     protected void startApp() { 
-        savedMac = loadMacFromRMS();
+        savedMac = loadMac();
         updateStatus();
         display.setCurrent(mainForm);
     }
-    
     protected void pauseApp() {}
     protected void destroyApp(boolean unconditional) {}
 
     public void commandAction(Command c, Displayable d) {
         if (c == exitCmd) {
             notifyDestroyed();
-        } else if (c.getCommandType() == Command.SCREEN && d == mainForm) {
+        } else if (c == settingsCmd) {
             macField.setString(savedMac != null ? savedMac : "");
             display.setCurrent(setupForm);
-        } else if (c == saveCmd && d == setupForm) {
+        } else if (c == backCmd) {
+            display.setCurrent(mainForm);
+        } else if (c == saveCmd) {
             String mac = macField.getString().trim().toUpperCase();
             if (mac.length() == 12 && isHex(mac)) {
-                saveMacToRMS(mac);
+                saveMac(mac);
                 savedMac = mac;
                 updateStatus();
                 display.setCurrent(mainForm);
             } else {
-                Alert a = new Alert("Ошибка", "Нужно ровно 12 символов (0-9, A-F)", null, AlertType.ERROR);
-                a.setTimeout(2000);
-                display.setCurrent(a, setupForm);
+                showMsg("Ошибка", "Нужно 12 символов (0-9, A-F)");
             }
-        } else if (c.getCommandType() == Command.BACK && d == setupForm) {
-            display.setCurrent(mainForm);
-        } else if (c == goCmd && d == mainForm) {
+        } else if (c == goCmd) {
             if (savedMac == null) {
-                Alert a = new Alert("Внимание", "Сначала нажмите 'Настроить' и введите MAC", null, AlertType.WARNING);
-                a.setTimeout(2000);
-                display.setCurrent(a, mainForm);
+                showMsg("Внимание", "Сначала нажмите 'Настроить'");
                 return;
             }
             resultItem.setText("Загрузка...");
-            new Thread(new Runnable() {
-                public void run() { connectAndFetch(); }
-            }).start();
+            Thread t = new Thread(new Runnable() {
+                public void run() { fetch(); }
+            });
+            t.start();
         }
     }
 
@@ -90,29 +87,20 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
         resultItem.setText(savedMac != null ? "OK: " + savedMac : "не задан");
     }
 
-    private void connectAndFetch() {
+    private void fetch() {
         StreamConnection conn = null;
         InputStream is = null;
         OutputStream os = null;
         try {
             String url = urlField.getString();
-            if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                url = "http://" + url;
-            }
+            if (!url.startsWith("http://") && !url.startsWith("https://")) url = "http://" + url;
 
-            // master=false часто стабильнее работает на S40 при подключении к Android-серверу
-            String connUrl = "btspp://" + savedMac + ":" + BT_CHANNEL + 
-                             ";authenticate=false;encrypt=false;master=false";
-            
+            String connUrl = "btspp://" + savedMac + ":" + BT_CHANNEL + ";authenticate=false;encrypt=false;master=false";
             conn = (StreamConnection) Connector.open(connUrl);
             os = conn.openOutputStream();
             is = conn.openInputStream();
 
-            String req = "GET " + url + " HTTP/1.1\r\n" +
-                         "Host: " + extractHost(url) + "\r\n" +
-                         "User-Agent: NokiaX2-00/J2ME\r\n" +
-                         "Connection: close\r\n\r\n";
-            
+            String req = "GET " + url + " HTTP/1.1\r\nHost: " + extractHost(url) + "\r\nUser-Agent: NokiaX2-00\r\nConnection: close\r\n\r\n";
             os.write(req.getBytes("UTF-8"));
             os.flush();
 
@@ -126,11 +114,8 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
             }
             
             String resp = new String(baos.toByteArray(), "UTF-8");
-            if (resp.length() > 800) {
-                resp = resp.substring(0, 800) + "\n\n... [обрезан]";
-            }
+            if (resp.length() > 800) resp = resp.substring(0, 800) + "\n...[обрезан]";
             resultItem.setText(resp);
-
         } catch (Exception e) {
             resultItem.setText("Ошибка: " + e.getMessage());
         } finally {
@@ -156,7 +141,7 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
         return true;
     }
 
-    private String loadMacFromRMS() {
+    private String loadMac() {
         try {
             RecordStore rs = RecordStore.openRecordStore(RMS_NAME, false);
             if (rs.getNumRecords() > 0) {
@@ -169,7 +154,7 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
         return null;
     }
 
-    private void saveMacToRMS(String mac) {
+    private void saveMac(String mac) {
         try {
             RecordStore rs = RecordStore.openRecordStore(RMS_NAME, true);
             byte[] data = mac.getBytes("UTF-8");
@@ -177,5 +162,11 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
             else rs.addRecord(data, 0, data.length);
             rs.closeRecordStore();
         } catch (Exception e) {}
+    }
+
+    private void showMsg(String title, String msg) {
+        Alert a = new Alert(title, msg, null, null);
+        a.setTimeout(3000);
+        display.setCurrent(a);
     }
 }
