@@ -3,45 +3,75 @@ package btproxy;
 import javax.microedition.midlet.*;
 import javax.microedition.lcdui.*;
 import javax.microedition.io.*;
+import javax.microedition.rms.*;
 import java.io.*;
 
 public class BTProxyMidlet extends MIDlet implements CommandListener {
     private Display display;
-    private Form form;
-    private TextField urlField;
-    private Command exitCommand, goCommand;
+    private Form mainForm, setupForm;
+    private TextField urlField, macField;
+    private Command exitCommand, goCommand, saveCommand;
     private StringItem resultItem;
     
-    // ЗАМЕНИТЕ на реальный MAC-адрес вашего Android-устройства (без двоеточий)
-    // и укажите правильный RFCOMM-канал (обычно 1, 2 или 3)
-    private static final String BT_MAC = "001122334455";
+    private static final String RMS_NAME = "BTProxySettings";
     private static final int BT_CHANNEL = 1;
+    private String savedMac = null;
 
     public BTProxyMidlet() {
         display = Display.getDisplay(this);
-        form = new Form("Bluetooth Internet Proxy");
+        exitCommand = new Command("Выход", Command.EXIT, 1);
+        
+        // Главный экран
+        mainForm = new Form("Bluetooth Internet Proxy");
         urlField = new TextField("URL:", "http://example.com", 100, TextField.ANY);
         resultItem = new StringItem("Статус:", "Готово к работе");
         goCommand = new Command("Загрузить", Command.OK, 1);
-        exitCommand = new Command("Выход", Command.EXIT, 1);
         
-        form.append(urlField);
-        form.append(resultItem);
-        form.addCommand(goCommand);
-        form.addCommand(exitCommand);
-        form.setCommandListener(this);
+        mainForm.append(urlField);
+        mainForm.append(resultItem);
+        mainForm.addCommand(goCommand);
+        mainForm.addCommand(exitCommand);
+        mainForm.setCommandListener(this);
+
+        // Экран первоначальной настройки
+        setupForm = new Form("Настройка Bluetooth");
+        macField = new TextField("MAC сервера (12 hex):", "", 12, TextField.ANY);
+        saveCommand = new Command("Сохранить", Command.OK, 1);
+        
+        setupForm.append("Узнайте MAC-адрес в Настройках Android (без двоеточий, например: AABBCCDDEEFF)");
+        setupForm.append(macField);
+        setupForm.addCommand(saveCommand);
+        setupForm.addCommand(exitCommand);
+        setupForm.setCommandListener(this);
     }
 
     protected void startApp() { 
-        display.setCurrent(form);
+        savedMac = loadMacFromRMS();
+        if (savedMac == null || savedMac.length() != 12) {
+            display.setCurrent(setupForm);
+        } else {
+            display.setCurrent(mainForm);
+        }
     }
+    
     protected void pauseApp() {}
+    
     protected void destroyApp(boolean unconditional) {}
 
     public void commandAction(Command c, Displayable d) {
         if (c == exitCommand) {
             notifyDestroyed();
-        } else if (c == goCommand) {
+        } else if (c == saveCommand && d == setupForm) {
+            String mac = macField.getString().trim().toUpperCase();
+            // Простая валидация: только hex-символы и длина 12
+            if (mac.length() == 12 && mac.matches("[0-9A-F]+")) {
+                saveMacToRMS(mac);
+                savedMac = mac;
+                display.setCurrent(mainForm);
+            } else {
+                alert("Ошибка", "Введите ровно 12 шестнадцатеричных символов (0-9, A-F) без двоеточий.");
+            }
+        } else if (c == goCommand && d == mainForm) {
             resultItem.setText("Подключение и загрузка...");
             Thread t = new Thread(new Runnable() {
                 public void run() { connectAndFetch(); }
@@ -60,8 +90,7 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
                 url = "http://" + url;
             }
 
-            // Прямое подключение к известному MAC-адресу и каналу без Service Discovery
-            String connUrl = "btspp://" + BT_MAC + ":" + BT_CHANNEL + 
+            String connUrl = "btspp://" + savedMac + ":" + BT_CHANNEL + 
                              ";authenticate=false;encrypt=false;master=true";
             
             conn = (StreamConnection) Connector.open(connUrl);
@@ -103,12 +132,47 @@ public class BTProxyMidlet extends MIDlet implements CommandListener {
 
     private String extractHost(String url) {
         String h = url;
-        if (h.startsWith("http://")) {
-            h = h.substring(7);
-        } else if (h.startsWith("https://")) {
-            h = h.substring(8);
-        }
+        if (h.startsWith("http://")) h = h.substring(7);
+        else if (h.startsWith("https://")) h = h.substring(8);
         int slash = h.indexOf('/');
         return slash > 0 ? h.substring(0, slash) : h;
+    }
+
+    // --- RMS (Record Management System) Методы ---
+    private String loadMacFromRMS() {
+        try {
+            RecordStore rs = RecordStore.openRecordStore(RMS_NAME, false);
+            if (rs.getNumRecords() > 0) {
+                byte[] data = rs.getRecord(1);
+                String mac = new String(data, "UTF-8");
+                rs.closeRecordStore();
+                return mac;
+            }
+            rs.closeRecordStore();
+        } catch (Exception e) {
+            // Игнорируем ошибки при первом запуске (хранилище не создано)
+        }
+        return null;
+    }
+
+    private void saveMacToRMS(String mac) {
+        try {
+            RecordStore rs = RecordStore.openRecordStore(RMS_NAME, true);
+            byte[] data = mac.getBytes("UTF-8");
+            if (rs.getNumRecords() > 0) {
+                rs.setRecord(1, data, 0, data.length);
+            } else {
+                rs.addRecord(data, 0, data.length);
+            }
+            rs.closeRecordStore();
+        } catch (Exception e) {
+            alert("Ошибка сохранения", "Не удалось сохранить настройки: " + e.getMessage());
+        }
+    }
+
+    private void alert(String title, String message) {
+        Alert a = new Alert(title, message, null, AlertType.ERROR);
+        a.setTimeout(Alert.FOREVER);
+        display.setCurrent(a);
     }
 }
