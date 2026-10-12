@@ -64,37 +64,11 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
             if (mac == null) mac = "000000000000";
             mac = mac.trim().toUpperCase();
             
-            // ИСПРАВЛЕНИЕ: Secure mode с аутентификацией и шифрованием
-            // Это синхронизирует Nokia с Android, который слушает в secure mode
-            Exception lastErr = null;
+            String connStr = "btspp://" + mac + ":1;authenticate=false;encrypt=false;master=false";
             
-            for (int ch = 30; ch >= 1; ch--) {
-                try {
-                    statusItem.setText("Ch " + ch + "/30...");
-                    // SECURE MODE: authenticate=true, encrypt=true
-                    String connStr = "btspp://" + mac + ":" + ch + ";authenticate=true;encrypt=true;master=false";
-                    conn = (StreamConnection) Connector.open(connStr, Connector.READ_WRITE, true);
-                    statusItem.setText("Ch " + ch + " OK!");
-                    break;
-                } catch (Exception e) {
-                    lastErr = e;
-                    if (conn != null) {
-                        try { conn.close(); } catch (Exception ex) {}
-                        conn = null;
-                    }
-                }
-            }
-            
-            if (conn == null) {
-                String errMsg = lastErr.getMessage();
-                if (errMsg == null || errMsg.trim().length() == 0) {
-                    errMsg = lastErr.getClass().getName();
-                }
-                statusItem.setText("Error: " + errMsg);
-                return;
-            }
-            
+            conn = (StreamConnection) Connector.open(connStr, Connector.READ_WRITE, true);
             statusItem.setText("Connected! Sending...");
+            
             os = conn.openOutputStream();
             is = conn.openInputStream();
             
@@ -117,16 +91,17 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
             } else {
                 statusItem.setText("Empty response");
             }
-        } catch (Exception e) {
-            String errMsg = e.getMessage();
+        } catch (Throwable e) { // Ловим Throwable, чтобы поймать даже Errors
+            // ИСПОЛЬЗУЕМ toString() вместо getMessage()
+            String errMsg = e.toString();
             if (errMsg == null || errMsg.trim().length() == 0) {
                 errMsg = e.getClass().getName();
             }
             statusItem.setText("Error: " + errMsg);
         } finally {
-            try { if (is != null) is.close(); } catch (Exception e) {}
-            try { if (os != null) os.close(); } catch (Exception e) {}
-            try { if (conn != null) conn.close(); } catch (Exception e) {}
+            try { if (is != null) is.close(); } catch (Throwable e) {}
+            try { if (os != null) os.close(); } catch (Throwable e) {}
+            try { if (conn != null) conn.close(); } catch (Throwable e) {}
         }
     }
 }
