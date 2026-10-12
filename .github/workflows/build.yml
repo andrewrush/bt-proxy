@@ -13,17 +13,20 @@ jobs:
           mkdir -p j2me/lib
           URL_MIDP="https://repo1.maven.org/maven2/org/microemu/midpapi20/2.0.4/midpapi20-2.0.4.jar"
           URL_CLDC="https://repo1.maven.org/maven2/org/microemu/cldcapi11/2.0.4/cldcapi11-2.0.4.jar"
+          URL_BT="https://repo1.maven.org/maven2/net/sf/bluecove/bluecove/2.1.0/bluecove-2.1.0.jar"
           
           wget -q -O j2me/lib/midpapi20.jar "$URL_MIDP"
-          jar tf j2me/lib/midpapi20.jar > /dev/null || { echo "Invalid MIDP JAR"; exit 1; }
-          
           wget -q -O j2me/lib/cldcapi11.jar "$URL_CLDC"
+          wget -q -O j2me/lib/bluecove.jar "$URL_BT"
+          
+          jar tf j2me/lib/midpapi20.jar > /dev/null || { echo "Invalid MIDP JAR"; exit 1; }
           jar tf j2me/lib/cldcapi11.jar > /dev/null || { echo "Invalid CLDC JAR"; exit 1; }
+          jar tf j2me/lib/bluecove.jar > /dev/null || { echo "Invalid BT JAR"; exit 1; }
       - name: Compile MIDlet
         run: |
           mkdir -p j2me/build/classes
           javac -source 1.3 -target 1.3 \
-            -bootclasspath j2me/lib/cldcapi11.jar:j2me/lib/midpapi20.jar \
+            -bootclasspath j2me/lib/cldcapi11.jar:j2me/lib/midpapi20.jar:j2me/lib/bluecove.jar \
             -d j2me/build/classes j2me/src/BTProxyMidlet.java
       - name: Package JAR + JAD
         run: |
