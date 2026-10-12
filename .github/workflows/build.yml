@@ -21,20 +21,22 @@ jobs:
             -d j2me/build/classes j2me/src/BTProxyMidlet.java
       - name: Package JAR + JAD
         run: |
-          cat > j2me/manifest.txt << 'MEOF'
-          Manifest-Version: 1.0
-          MIDlet-Name: BTProxy
-          MIDlet-Version: 1.0
-          MIDlet-Vendor: andrewrush
-          MIDlet-1: BTProxy, , btproxy.BTProxyMidlet
-          MicroEdition-Profile: MIDP-2.0
-          MicroEdition-Configuration: CLDC-1.1
-          MEOF
+          # Создаем манифест простыми echo, без heredoc
+          echo "Manifest-Version: 1.0" > j2me/manifest.txt
+          echo "MIDlet-Name: BTProxy" >> j2me/manifest.txt
+          echo "MIDlet-Version: 1.0" >> j2me/manifest.txt
+          echo "MIDlet-Vendor: andrewrush" >> j2me/manifest.txt
+          echo "MIDlet-1: BTProxy, , btproxy.BTProxyMidlet" >> j2me/manifest.txt
+          echo "MicroEdition-Profile: MIDP-2.0" >> j2me/manifest.txt
+          echo "MicroEdition-Configuration: CLDC-1.1" >> j2me/manifest.txt
+          
           cd j2me/build/classes
           jar cfm ../../BTProxy.jar ../../manifest.txt .
           cd ../..
+          
           JAR_SIZE=$(stat -c%s j2me/BTProxy.jar)
           printf "MIDlet-Name: BTProxy\nMIDlet-Version: 1.0\nMIDlet-Vendor: andrewrush\nMIDlet-1: BTProxy, , btproxy.BTProxyMidlet\nMIDlet-Jar-URL: BTProxy.jar\nMIDlet-Jar-Size: %s\n" "$JAR_SIZE" > j2me/BTProxy.jad
+          
           echo "--- JAD CONTENT ---"
           cat j2me/BTProxy.jad
           echo "--- JAR CONTENTS ---"
