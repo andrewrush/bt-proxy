@@ -21,10 +21,15 @@ jobs:
             -d j2me/build/classes j2me/src/BTProxyMidlet.java
       - name: Preverify with ProGuard
         run: |
+          # Устанавливаем unzip (его нет в образе, но он нужен для надежной распаковки)
+          apt-get update -qq && apt-get install -y -qq unzip
+          
           mkdir -p j2me/lib/pg
           wget -q -O j2me/lib/pg/proguard.zip https://github.com/Guardsquare/proguard/releases/download/v7.3.2/proguard-7.3.2.zip
-          # Используем jar вместо unzip, так как он гарантированно есть в JDK
-          cd j2me/lib/pg && jar xf proguard.zip && cd ../../..
+          
+          # Распаковываем архив. Он создаст папку proguard-7.3.2 внутри j2me/lib/pg
+          unzip -q -d j2me/lib/pg j2me/lib/pg/proguard.zip
+          
           echo "-injars j2me/build/classes" > j2me/proguard.cfg
           echo "-outjars j2me/build/preverified" >> j2me/proguard.cfg
           echo "-libraryjars j2me/lib/cldcapi11.jar" >> j2me/proguard.cfg
@@ -34,7 +39,10 @@ jobs:
           echo "-dontoptimize" >> j2me/proguard.cfg
           echo "-dontshrink" >> j2me/proguard.cfg
           echo "-preverify" >> j2me/proguard.cfg
-          java -jar j2me/lib/pg/lib/proguard.jar @j2me/proguard.cfg
+          
+          # Запускаем preverify с правильным путем к jar-файлу внутри распакованной папки
+          java -jar j2me/lib/pg/proguard-7.3.2/lib/proguard.jar @j2me/proguard.cfg
+          
           echo "--- Bytecode version check ---"
           javap -verbose j2me/build/preverified/btproxy/BTProxyMidlet.class | grep "major version" || true
       - name: Package JAR + JAD
@@ -47,7 +55,9 @@ jobs:
           echo "MicroEdition-Profile: MIDP-2.0" >> j2me/manifest.txt
           echo "MicroEdition-Configuration: CLDC-1.1" >> j2me/manifest.txt
           echo "MIDlet-Permissions: javax.microedition.io.Connector.http,javax.microedition.io.Connector.https,javax.microedition.io.Connector.bluetooth" >> j2me/manifest.txt
+          
           jar cfm j2me/BTProxy.jar j2me/manifest.txt -C j2me/build/preverified .
+          
           JAR_SIZE=$(stat -c%s j2me/BTProxy.jar)
           printf "MIDlet-Name: BTProxy\nMIDlet-Version: 1.0\nMIDlet-Vendor: andrewrush\nMIDlet-1: BTProxy,,btproxy.BTProxyMidlet\nMIDlet-Jar-URL: BTProxy.jar\nMIDlet-Jar-Size: %s\nMIDlet-Permissions: javax.microedition.io.Connector.http,javax.microedition.io.Connector.https,javax.microedition.io.Connector.bluetooth\n" "$JAR_SIZE" > j2me/BTProxy.jad
       - uses: actions/upload-artifact@v4
