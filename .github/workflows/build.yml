@@ -13,7 +13,6 @@ jobs:
           mkdir -p j2me/lib
           wget -q -O j2me/lib/midpapi20.jar https://repo1.maven.org/maven2/org/microemu/midpapi20/2.0.4/midpapi20-2.0.4.jar
           wget -q -O j2me/lib/cldcapi11.jar https://repo1.maven.org/maven2/org/microemu/cldcapi11/2.0.4/cldcapi11-2.0.4.jar
-          # Скачиваем stub только для компиляции, чтобы javac знал о javax.bluetooth
           wget -q -O j2me/lib/bluecove.jar https://repo1.maven.org/maven2/net/sf/bluecove/bluecove/2.1.0/bluecove-2.1.0.jar
       - name: Compile MIDlet
         run: |
@@ -33,6 +32,8 @@ jobs:
           echo "-outjars j2me/build/preverified" >> proguard.cfg
           echo "-libraryjars j2me/lib/cldcapi11.jar" >> proguard.cfg
           echo "-libraryjars j2me/lib/midpapi20.jar" >> proguard.cfg
+          # Говорим ProGuard игнорировать отсутствие javax.bluetooth, так как они есть в телефоне
+          echo "-dontwarn javax.bluetooth.**" >> proguard.cfg
           echo "-microedition" >> proguard.cfg
           echo "-dontobfuscate" >> proguard.cfg
           echo "-dontoptimize" >> proguard.cfg
@@ -53,7 +54,6 @@ jobs:
           echo "MicroEdition-Configuration: CLDC-1.1" >> j2me/manifest.txt
           echo "MIDlet-Permissions: javax.microedition.io.Connector.http,javax.microedition.io.Connector.https,javax.microedition.io.Connector.bluetooth" >> j2me/manifest.txt
           
-          # ВАЖНО: пакуются ТОЛЬКО преверифицированные классы из папки preverified, bluecove.jar НЕ включается!
           jar cfm j2me/BTProxy.jar j2me/manifest.txt -C j2me/build/preverified .
           
           JAR_SIZE=$(stat -c%s j2me/BTProxy.jar)
