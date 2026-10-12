@@ -19,10 +19,13 @@ import android.widget.TextView;
 import android.widget.Toast;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Method;
 import java.net.Socket;
 import java.net.URL;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import javax.net.ssl.SSLSocketFactory;
@@ -36,8 +39,8 @@ public class MainActivity extends Activity {
     private Handler handler;
     
     private boolean isRunning = false;
-    private BluetoothServerSocket serverSocket;
-    private Thread serverThread;
+    private List<BluetoothServerSocket> serverSockets = new ArrayList<>();
+    private List<Thread> serverThreads = new ArrayList<>();
     private static final int PERMISSION_REQUEST_CODE = 1001;
 
     @Override
@@ -121,61 +124,82 @@ public class MainActivity extends Activity {
         isRunning = true;
         btnStartStop.setText("СТОП СЕРВЕРА");
         log("Сервер запускается...");
-        serverThread = new Thread(new ServerRunnable());
-        serverThread.start();
+        
+        // Запускаем серверы на каналах 6-30 (пропуская 1-5, занятые системой)
+        for (int ch = 6; ch <= 30; ch++) {
+            final int channel = ch;
+            Thread t = new Thread(new Runnable() {
+                public void run() {
+                    startListenerOnChannel(channel);
+                }
+            });
+            t.start();
+            serverThreads.add(t);
+        }
+    }
+
+    private void startListenerOnChannel(int channel) {
+        BluetoothServerSocket socket = null;
+        try {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            
+            // Пытаемся использовать reflection для фиксации канала
+            try {
+                Method method = adapter.getClass().getMethod("listenUsingInsecureRfcommOn", int.class);
+                socket = (BluetoothServerSocket) method.invoke(adapter, channel);
+                log("Канал " + channel + ": слушает (reflection)");
+            } catch (Exception e) {
+                // Fallback: стандартный метод (канал выбирается системой)
+                socket = adapter.listenUsingInsecureRfcommWithServiceRecord("BTProxy_" + channel, SPP_UUID);
+                log("Канал " + channel + ": слушает (стандарт)");
+            }
+            
+            serverSockets.add(socket);
+            
+            while (isRunning) {
+                BluetoothSocket clientSocket = socket.accept();
+                log("*** КЛИЕНТ НА КАНАЛЕ " + channel + "! ***");
+                new Thread(new ClientHandler(clientSocket, channel)).start();
+            }
+        } catch (Exception e) {
+            log("Канал " + channel + ": ошибка - " + e.getMessage());
+        }
     }
 
     private void stopServer() {
         isRunning = false;
         btnStartStop.setText("СТАРТ СЕРВЕРА");
         log("Остановка...");
-        if (serverSocket != null) {
-            try { serverSocket.close(); } catch (Exception e) {}
+        for (BluetoothServerSocket s : serverSockets) {
+            try { s.close(); } catch (Exception e) {}
         }
-        if (serverThread != null) {
-            try { serverThread.interrupt(); } catch (Exception e) {}
+        serverSockets.clear();
+        for (Thread t : serverThreads) {
+            try { t.interrupt(); } catch (Exception e) {}
         }
+        serverThreads.clear();
         log("Сервер остановлен.");
-    }
-
-    private class ServerRunnable implements Runnable {
-        public void run() {
-            try {
-                log("Слушаю через insecure метод...");
-                serverSocket = BluetoothAdapter.getDefaultAdapter()
-                        .listenUsingInsecureRfcommWithServiceRecord("BTProxy", SPP_UUID);
-                log("Сервер слушает...");
-                
-                while (isRunning) {
-                    log("accept() - жду соединение...");
-                    BluetoothSocket clientSocket = serverSocket.accept();
-                    log("Клиент подключился! Запускаю обработчик...");
-                    new Thread(new ClientHandler(clientSocket)).start();
-                }
-            } catch (Exception e) {
-                if (isRunning) log("Ошибка сервера: " + e.getMessage());
-            }
-        }
     }
 
     private class ClientHandler implements Runnable {
         private BluetoothSocket clientSocket;
-        public ClientHandler(BluetoothSocket socket) { this.clientSocket = socket; }
+        private int channel;
+        public ClientHandler(BluetoothSocket socket, int ch) { 
+            this.clientSocket = socket; 
+            this.channel = ch;
+        }
 
         public void run() {
             try {
-                log("Получаю InputStream...");
+                log("[" + channel + "] Получаю InputStream...");
                 InputStream in = clientSocket.getInputStream();
-                log("Получаю OutputStream...");
                 OutputStream out = clientSocket.getOutputStream();
 
-                // УПРОЩЁННОЕ ЧТЕНИЕ: читаем до первого \n\n (конец заголовков)
                 StringBuilder sb = new StringBuilder();
                 int b;
                 int newlineCount = 0;
                 int bytesRead = 0;
                 
-                log("Начинаю чтение заголовков...");
                 while ((b = in.read()) != -1 && bytesRead < 4096) {
                     char c = (char) b;
                     sb.append(c);
@@ -183,46 +207,34 @@ public class MainActivity extends Activity {
                     
                     if (c == '\n') {
                         newlineCount++;
-                        if (newlineCount >= 2) {
-                            log("Найден конец заголовков (\\n\\n)");
-                            break;
-                        }
+                        if (newlineCount >= 2) break;
                     } else if (c != '\r') {
                         newlineCount = 0;
                     }
                 }
 
                 String requestLine = sb.toString().trim();
-                log("Получено (" + bytesRead + " байт): " + requestLine.substring(0, Math.min(requestLine.length(), 100)));
+                log("[" + channel + "] Получено: " + requestLine.substring(0, Math.min(requestLine.length(), 100)));
 
                 if (requestLine.startsWith("GET http")) {
                     String[] tokens = requestLine.split(" ");
-                    if (tokens.length < 2) {
-                        log("Ошибка: неверный формат URL");
-                        out.write("HTTP/1.1 400 Bad Request\r\n\r\n".getBytes("UTF-8"));
-                        out.flush();
-                        return;
-                    }
                     URL url = new URL(tokens[1]);
                     String host = url.getHost();
                     int port = url.getPort() != -1 ? url.getPort() : (url.getProtocol().equals("https") ? 443 : 80);
                     String path = url.getFile().isEmpty() ? "/" : url.getFile();
 
-                    log("Цель: " + host + ":" + port + path);
+                    log("[" + channel + "] Цель: " + host + ":" + port + path);
 
                     Socket targetSocket = url.getProtocol().equals("https") ?
                         SSLSocketFactory.getDefault().createSocket(host, port) : new Socket(host, port);
-                    log("Соединение с целью установлено");
 
                     OutputStream targetOut = targetSocket.getOutputStream();
                     InputStream targetIn = targetSocket.getInputStream();
 
                     targetOut.write(("GET " + path + " HTTP/1.1\r\n").getBytes("UTF-8"));
                     targetOut.write(("Host: " + host + "\r\n").getBytes("UTF-8"));
-                    targetOut.write("User-Agent: BTProxyServer\r\n".getBytes("UTF-8"));
                     targetOut.write("Connection: close\r\n\r\n".getBytes("UTF-8"));
                     targetOut.flush();
-                    log("Запрос отправлен цели, жду ответ...");
 
                     byte[] respBuffer = new byte[4096];
                     int total = 0;
@@ -231,21 +243,14 @@ public class MainActivity extends Activity {
                         out.write(respBuffer, 0, read);
                         out.flush();
                         total += read;
-                        log("Отправлено клиенту: " + total + " байт");
                     }
-                    log("ВСЕГО отправлено байт клиенту: " + total);
+                    log("[" + channel + "] Отправлено клиенту: " + total + " байт");
                     targetSocket.close();
-                } else {
-                    log("Игнорирован не-HTTP запрос");
-                    out.write("HTTP/1.1 400 Bad Request\r\n\r\n".getBytes("UTF-8"));
-                    out.flush();
                 }
             } catch (Exception e) {
-                log("Ошибка обработки: " + e.getMessage());
-                e.printStackTrace();
+                log("[" + channel + "] Ошибка: " + e.getMessage());
             } finally {
                 try { clientSocket.close(); } catch (Exception e) {}
-                log("Соединение с клиентом закрыто");
             }
         }
     }
