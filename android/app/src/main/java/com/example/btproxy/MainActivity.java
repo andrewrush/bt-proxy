@@ -19,7 +19,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.lang.reflect.Method;
 import java.net.Socket;
 import java.net.URL;
 import java.text.SimpleDateFormat;
@@ -142,25 +141,9 @@ public class MainActivity extends Activity {
     private class ServerRunnable implements Runnable {
         public void run() {
             try {
-                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-                
                 log("Слушаю через insecure метод...");
-                serverSocket = adapter.listenUsingInsecureRfcommWithServiceRecord("BTProxy", SPP_UUID);
-                
-                // Пытаемся узнать реальный канал через reflection
-                try {
-                    Method getServiceRecord = serverSocket.getClass().getMethod("getServiceRecord");
-                    Object serviceRecord = getServiceRecord.invoke(serverSocket);
-                    if (serviceRecord != null) {
-                        Method getChannel = serviceRecord.getClass().getMethod("getChannel");
-                        int channel = (Integer) getChannel.invoke(serviceRecord);
-                        log("*** РЕАЛЬНЫЙ КАНАЛ СЕРВЕРА: " + channel + " ***");
-                        log("*** Введите этот номер в J2ME вместо перебора! ***");
-                    }
-                } catch (Exception e) {
-                    log("Не удалось узнать канал: " + e.getMessage());
-                }
-                
+                serverSocket = BluetoothAdapter.getDefaultAdapter()
+                        .listenUsingInsecureRfcommWithServiceRecord("BTProxy", SPP_UUID);
                 log("Сервер слушает...");
                 
                 while (isRunning) {
@@ -186,28 +169,38 @@ public class MainActivity extends Activity {
                 log("Получаю OutputStream...");
                 OutputStream out = clientSocket.getOutputStream();
 
+                // УПРОЩЁННОЕ ЧТЕНИЕ: читаем до первого \n\n (конец заголовков)
                 StringBuilder sb = new StringBuilder();
                 int b;
-                int crlfCount = 0;
-                while ((b = in.read()) != -1) {
+                int newlineCount = 0;
+                int bytesRead = 0;
+                
+                log("Начинаю чтение заголовков...");
+                while ((b = in.read()) != -1 && bytesRead < 4096) {
                     char c = (char) b;
                     sb.append(c);
+                    bytesRead++;
                     
                     if (c == '\n') {
-                        crlfCount++;
-                        if (crlfCount >= 2) break;
+                        newlineCount++;
+                        if (newlineCount >= 2) {
+                            log("Найден конец заголовков (\\n\\n)");
+                            break;
+                        }
                     } else if (c != '\r') {
-                        crlfCount = 0;
+                        newlineCount = 0;
                     }
                 }
 
                 String requestLine = sb.toString().trim();
-                log("Получено: " + requestLine.substring(0, Math.min(requestLine.length(), 100)));
+                log("Получено (" + bytesRead + " байт): " + requestLine.substring(0, Math.min(requestLine.length(), 100)));
 
                 if (requestLine.startsWith("GET http")) {
                     String[] tokens = requestLine.split(" ");
                     if (tokens.length < 2) {
                         log("Ошибка: неверный формат URL");
+                        out.write("HTTP/1.1 400 Bad Request\r\n\r\n".getBytes("UTF-8"));
+                        out.flush();
                         return;
                     }
                     URL url = new URL(tokens[1]);
@@ -232,17 +225,20 @@ public class MainActivity extends Activity {
                     log("Запрос отправлен цели, жду ответ...");
 
                     byte[] respBuffer = new byte[4096];
-                    int bytesRead;
                     int total = 0;
-                    while ((bytesRead = targetIn.read(respBuffer)) != -1) {
-                        out.write(respBuffer, 0, bytesRead);
+                    int read;
+                    while ((read = targetIn.read(respBuffer)) != -1) {
+                        out.write(respBuffer, 0, read);
                         out.flush();
-                        total += bytesRead;
+                        total += read;
+                        log("Отправлено клиенту: " + total + " байт");
                     }
-                    log("Отправлено байт клиенту: " + total);
+                    log("ВСЕГО отправлено байт клиенту: " + total);
                     targetSocket.close();
                 } else {
                     log("Игнорирован не-HTTP запрос");
+                    out.write("HTTP/1.1 400 Bad Request\r\n\r\n".getBytes("UTF-8"));
+                    out.flush();
                 }
             } catch (Exception e) {
                 log("Ошибка обработки: " + e.getMessage());
