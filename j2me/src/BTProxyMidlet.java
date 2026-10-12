@@ -22,9 +22,7 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
     private RemoteDevice selectedDevice;
     private String connectionURL;
 
-    // ИСПРАВЛЕНИЕ 6: Короткий UUID надежнее на старых JVM
     private static final UUID[] SEARCH_UUIDS = { new UUID(0x1101) };
-    // ИСПРАВЛЕНИЕ 5: Запрашиваем только ProtocolDescriptorList для скорости
     private static final int[] ATTR_SET = { 0x0100 };
 
     public BTProxyMidlet() {
@@ -68,7 +66,6 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
             notifyDestroyed();
         } else if (c == searchCmd && d == mainForm) {
             statusItem.setText("Scanning...");
-            // ИСПРАВЛЕНИЕ 4: Безопасная очистка списка для S40
             while (deviceList.size() > 0) {
                 deviceList.delete(0);
             }
@@ -119,7 +116,8 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
 
     public void servicesDiscovered(int transID, ServiceRecord[] servRecord) {
         if (servRecord != null && servRecord.length > 0) {
-            connectionURL = servRecord[0].getConnectionURL(ServiceRecord.NOAUTHENTICATE_NOENCRYPT, false);
+            // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: true заставляет Nokia взять на себя роль мастера, решая конфликт ролей
+            connectionURL = servRecord[0].getConnectionURL(ServiceRecord.NOAUTHENTICATE_NOENCRYPT, true);
             statusItem.setText("Service found! Connecting...");
             new Thread(this).start();
         } else {
@@ -138,12 +136,16 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
         InputStream is = null;
         OutputStream os = null;
         try {
+            statusItem.setText("Step 1: Connector.open");
             conn = (StreamConnection) Connector.open(connectionURL);
-            statusItem.setText("Connected! Sending URL...");
             
+            statusItem.setText("Step 2: openOutputStream");
             os = conn.openOutputStream();
+            
+            statusItem.setText("Step 3: openInputStream");
             is = conn.openInputStream();
             
+            statusItem.setText("Step 4: sending request");
             String url = urlField.getString();
             if (!url.startsWith("http://") && !url.startsWith("https://")) {
                 url = "http://" + url;
@@ -159,9 +161,8 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
             os.write(req.getBytes("UTF-8"));
             os.flush();
             
-            statusItem.setText("Waiting for response...");
+            statusItem.setText("Step 5: Waiting for response...");
             
-            // ИСПРАВЛЕНИЕ 1: Потоковое чтение до конца (-1) с лимитом памяти S40
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             byte[] buf = new byte[2048];
             int total = 0;
@@ -169,7 +170,7 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
             while ((n = is.read(buf)) != -1) {
                 baos.write(buf, 0, n);
                 total += n;
-                if (total > 8192) break; // Защита от переполнения памяти на S40
+                if (total > 8192) break;
             }
             
             if (total > 0) {
@@ -180,8 +181,8 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
                 statusItem.setText("Empty response from Android");
             }
         } catch (Throwable e) {
-            // КЛЮЧЕВОЕ: e.toString() покажет точную причину (например, таймаут или отказ в доступе)
-            statusItem.setText("Error: " + e.toString());
+            // Теперь мы точно узнаем, на каком шаге произошел сбой
+            statusItem.setText("FAIL at last step: " + e.toString());
         } finally {
             try { if (is != null) is.close(); } catch (Throwable e) {}
             try { if (os != null) os.close(); } catch (Throwable e) {}
