@@ -3,131 +3,44 @@ package btproxy;
 import javax.microedition.midlet.*;
 import javax.microedition.lcdui.*;
 import javax.microedition.io.*;
-import javax.bluetooth.*;
 import java.io.*;
-import java.util.Vector;
 
-public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryListener, Runnable {
+public class BTProxyMidlet extends MIDlet implements CommandListener, Runnable {
     private Display display;
     private Form mainForm;
-    private List deviceList;
     private TextField urlField;
     private StringItem statusItem;
-    
-    private Command exitCmd, searchCmd, connectCmd, backCmd;
-    
-    private DiscoveryAgent agent;
-    private Vector devices = new Vector();
-    private Vector names = new Vector();
-    private RemoteDevice selectedDevice;
-    private String connectionURL;
-
-    private static final UUID[] SEARCH_UUIDS = { new UUID(0x1101) };
-    private static final int[] ATTR_SET = { 0x0100 };
+    private Command startCmd, exitCmd;
+    private StreamConnectionNotifier notifier;
+    private String currentStep = "Idle";
 
     public BTProxyMidlet() {
         display = Display.getDisplay(this);
-        
-        exitCmd = new Command("Exit", Command.EXIT, 1);
-        searchCmd = new Command("Find Android", Command.OK, 1);
-        connectCmd = new Command("Connect", Command.OK, 1);
-        backCmd = new Command("Back", Command.BACK, 1);
-
-        mainForm = new Form("BT Proxy Client");
+        mainForm = new Form("BT Proxy Server");
         urlField = new TextField("URL:", "http://neverssl.com", 100, TextField.ANY);
-        statusItem = new StringItem("Status:", "Press 'Find Android'");
+        statusItem = new StringItem("Status:", "Press 'Start Server'");
         mainForm.append(urlField);
         mainForm.append(statusItem);
-        mainForm.addCommand(searchCmd);
+        
+        startCmd = new Command("Start Server", Command.OK, 1);
+        exitCmd = new Command("Exit", Command.EXIT, 1);
+        mainForm.addCommand(startCmd);
         mainForm.addCommand(exitCmd);
         mainForm.setCommandListener(this);
-
-        deviceList = new List("Select Android Device", List.IMPLICIT);
-        deviceList.addCommand(connectCmd);
-        deviceList.addCommand(backCmd);
-        deviceList.setCommandListener(this);
     }
 
-    protected void startApp() {
-        try {
-            LocalDevice local = LocalDevice.getLocalDevice();
-            agent = local.getDiscoveryAgent();
-        } catch (Throwable t) {
-            statusItem.setText("BT Init Error: " + t.toString());
-        }
-        display.setCurrent(mainForm);
-    }
-    
+    protected void startApp() { display.setCurrent(mainForm); }
     protected void pauseApp() {}
-    protected void destroyApp(boolean unconditional) {}
+    protected void destroyApp(boolean unconditional) {
+        try { if (notifier != null) notifier.close(); } catch (Exception e) {}
+    }
 
     public void commandAction(Command c, Displayable d) {
-        if (c == exitCmd) {
-            notifyDestroyed();
-        } else if (c == searchCmd && d == mainForm) {
-            statusItem.setText("Scanning...");
-            while (deviceList.size() > 0) {
-                deviceList.delete(0);
-            }
-            devices.removeAllElements();
-            names.removeAllElements();
-            try {
-                agent.startInquiry(DiscoveryAgent.GIAC, this);
-            } catch (Throwable t) {
-                statusItem.setText("Inquiry Error: " + t.toString());
-            }
-        } else if (c == backCmd && d == deviceList) {
-            display.setCurrent(mainForm);
-        } else if (c == connectCmd && d == deviceList) {
-            int idx = deviceList.getSelectedIndex();
-            if (idx >= 0) {
-                selectedDevice = (RemoteDevice) devices.elementAt(idx);
-                statusItem.setText("Searching service on " + (String)names.elementAt(idx) + "...");
-                display.setCurrent(mainForm);
-                try {
-                    agent.searchServices(ATTR_SET, SEARCH_UUIDS, selectedDevice, this);
-                } catch (Throwable t) {
-                    statusItem.setText("Search Error: " + t.toString());
-                }
-            }
-        }
-    }
-
-    public void deviceDiscovered(RemoteDevice btDevice, DeviceClass cod) {
-        try {
-            String name = btDevice.getFriendlyName(false);
-            if (name == null || name.length() == 0) name = btDevice.getBluetoothAddress();
-            devices.addElement(btDevice);
-            names.addElement(name);
-        } catch (Exception e) {}
-    }
-
-    public void inquiryCompleted(int discType) {
-        if (devices.size() == 0) {
-            statusItem.setText("No devices found. Check BT.");
-        } else {
-            while (deviceList.size() > 0) deviceList.delete(0);
-            for (int i = 0; i < names.size(); i++) {
-                deviceList.append((String) names.elementAt(i), null);
-            }
-            display.setCurrent(deviceList);
-        }
-    }
-
-    public void servicesDiscovered(int transID, ServiceRecord[] servRecord) {
-        if (servRecord != null && servRecord.length > 0) {
-            // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: true заставляет Nokia взять на себя роль мастера, решая конфликт ролей
-            connectionURL = servRecord[0].getConnectionURL(ServiceRecord.NOAUTHENTICATE_NOENCRYPT, true);
-            statusItem.setText("Service found! Connecting...");
+        if (c == exitCmd) notifyDestroyed();
+        else if (c == startCmd) {
+            currentStep = "Starting server...";
+            statusItem.setText(currentStep);
             new Thread(this).start();
-        } else {
-            statusItem.setText("BTProxy service not found on device.");
-        }
-    }
-
-    public void serviceSearchCompleted(int transID, int respCode) {
-        if (respCode != DiscoveryListener.SERVICE_SEARCH_COMPLETED) {
-            statusItem.setText("Service search failed: " + respCode);
         }
     }
 
@@ -136,57 +49,71 @@ public class BTProxyMidlet extends MIDlet implements CommandListener, DiscoveryL
         InputStream is = null;
         OutputStream os = null;
         try {
-            statusItem.setText("Step 1: Connector.open");
-            conn = (StreamConnection) Connector.open(connectionURL);
+            currentStep = "1. Opening notifier";
+            statusItem.setText(currentStep);
+            // ПРАВИЛЬНЫЙ URL: регистрирует сервис в SDP, чтобы Android мог его найти
+            String url = "btspp://localhost:0000110100001000800000805F9B34FB;name=BTProxy;authenticate=false;encrypt=false";
+            notifier = (StreamConnectionNotifier) Connector.open(url);
             
-            statusItem.setText("Step 2: openOutputStream");
-            os = conn.openOutputStream();
+            currentStep = "2. Waiting for Android...";
+            statusItem.setText(currentStep);
             
-            statusItem.setText("Step 3: openInputStream");
-            is = conn.openInputStream();
-            
-            statusItem.setText("Step 4: sending request");
-            String url = urlField.getString();
-            if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                url = "http://" + url;
-            }
-            
-            String host = url;
-            if (host.startsWith("http://")) host = host.substring(7);
-            else if (host.startsWith("https://")) host = host.substring(8);
-            int slash = host.indexOf('/');
-            if (slash > 0) host = host.substring(0, slash);
+            // Бесконечный цикл для обработки множественных подключений
+            while (true) {
+                conn = notifier.acceptAndOpen();
+                currentStep = "3. Android connected!";
+                statusItem.setText(currentStep);
+                
+                try {
+                    currentStep = "4. Opening streams";
+                    is = conn.openInputStream();
+                    os = conn.openOutputStream();
 
-            String req = "GET " + url + " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: NokiaX2-00\r\nConnection: close\r\n\r\n";
-            os.write(req.getBytes("UTF-8"));
-            os.flush();
-            
-            statusItem.setText("Step 5: Waiting for response...");
-            
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            byte[] buf = new byte[2048];
-            int total = 0;
-            int n;
-            while ((n = is.read(buf)) != -1) {
-                baos.write(buf, 0, n);
-                total += n;
-                if (total > 8192) break;
-            }
-            
-            if (total > 0) {
-                String resp = new String(baos.toByteArray(), "UTF-8");
-                if (resp.length() > 400) resp = resp.substring(0, 400) + "\n...[cut]";
-                statusItem.setText("SUCCESS:\n" + resp);
-            } else {
-                statusItem.setText("Empty response from Android");
+                    currentStep = "5. Reading request";
+                    byte[] buf = new byte[4096];
+                    int n = is.read(buf);
+                    if (n > 0) {
+                        String req = new String(buf, 0, n, "UTF-8");
+                        currentStep = "6. Sending to Android...";
+                        statusItem.setText(currentStep + "\nReq: " + req.substring(0, Math.min(req.length(), 30)));
+                        
+                        // Отправляем запрос на Android
+                        os.write(req.getBytes("UTF-8"));
+                        os.flush();
+
+                        currentStep = "7. Waiting for response";
+                        // Читаем ответ от Android
+                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                        byte[] rbuf = new byte[2048];
+                        int total = 0, r;
+                        while ((r = is.read(rbuf)) != -1) {
+                            baos.write(rbuf, 0, r);
+                            total += r;
+                            if (total > 8192) break;
+                        }
+                        
+                        if (total > 0) {
+                            String resp = new String(baos.toByteArray(), "UTF-8");
+                            if (resp.length() > 400) resp = resp.substring(0, 400) + "\n...[cut]";
+                            statusItem.setText("SUCCESS:\n" + resp);
+                        } else {
+                            statusItem.setText("Empty response");
+                        }
+                    }
+                } catch (Throwable e) {
+                    statusItem.setText("FAIL at step '" + currentStep + "':\n" + e.toString());
+                } finally {
+                    try { if (is != null) is.close(); } catch (Throwable e) {}
+                    try { if (os != null) os.close(); } catch (Throwable e) {}
+                    try { if (conn != null) conn.close(); } catch (Throwable e) {}
+                    currentStep = "8. Closed. Waiting for next...";
+                    statusItem.setText(currentStep);
+                }
             }
         } catch (Throwable e) {
-            // Теперь мы точно узнаем, на каком шаге произошел сбой
-            statusItem.setText("FAIL at last step: " + e.toString());
+            statusItem.setText("FAIL at step '" + currentStep + "':\n" + e.toString());
         } finally {
-            try { if (is != null) is.close(); } catch (Throwable e) {}
-            try { if (os != null) os.close(); } catch (Throwable e) {}
-            try { if (conn != null) conn.close(); } catch (Throwable e) {}
+            try { if (notifier != null) notifier.close(); } catch (Exception e) {}
         }
     }
 }
